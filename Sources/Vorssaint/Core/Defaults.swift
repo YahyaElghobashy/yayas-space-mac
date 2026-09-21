@@ -1050,8 +1050,8 @@ enum Defaults {
         // background check keeps a timer, so it starts off.
         DefaultsKey.appUpdatesCheckFrequency: AppUpdatesSupport.CheckFrequency.off.rawValue,
         DefaultsKey.appUpdatesIncludeHomebrewApps: true,
-        DefaultsKey.appUpdatesIncludeAppStore: false,     // sealed: online source removed
-        DefaultsKey.appUpdatesIncludeOnlineCatalog: false, // sealed: online source removed
+        DefaultsKey.appUpdatesIncludeAppStore: true,
+        DefaultsKey.appUpdatesIncludeOnlineCatalog: true,
         DefaultsKey.appUpdatesNotify: true,
         DefaultsKey.appUpdatesLastCheck: 0.0,
         DefaultsKey.appUpdatesLastCount: 0,

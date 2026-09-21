@@ -46,6 +46,7 @@ final class AppUpdatesService: ObservableObject {
     /// The person was sent elsewhere to finish an update, so the list is
     /// about to be wrong until it is read again.
     private(set) var updateHandoffPending = false
+    private var onlineCatalogCache: (loadedAt: Date, entries: [AppUpdatesSupport.CatalogEntry])?
     /// Alive only while an upgrade this service started is running, so the
     /// list refreshes itself even when no window is on screen to notice.
     private var upgradeObserver: AnyCancellable?
@@ -134,12 +135,17 @@ final class AppUpdatesService: ObservableObject {
         let generation = scanGeneration
         let includeHomebrewApps = UserDefaults.standard.bool(
             forKey: DefaultsKey.appUpdatesIncludeHomebrewApps)
-        // Sealed fork: the App Store lookup, the public cask catalog and the
-        // publisher feeds were online sources and are gone. Only the local
-        // package manager (`brew`) answers; the preferences are ignored.
-        let includeAppStore = false
-        let includeOnlineCatalog = false
+        let includeAppStore = UserDefaults.standard.bool(forKey: DefaultsKey.appUpdatesIncludeAppStore)
+        let includeOnlineCatalog = UserDefaults.standard.bool(
+            forKey: DefaultsKey.appUpdatesIncludeOnlineCatalog)
+        let country = Locale.current.region?.identifier
 
+        // Sealed fork: the App Store lookup (itunes.apple.com,
+        // uclient-api.itunes.apple.com) and the Homebrew cask catalog
+        // (formulae.brew.sh) are back, each a read-only GET through
+        // SealedURLSession. The upstream publisher feeds (Sparkle SUFeedURL /
+        // latest-mac.yml, one request per third-party vendor) stay removed:
+        // `feedResult` is always empty.
         workQueue.async { [weak self] in
             guard let self else { return }
             let apps = Self.scanInstalledApps()
@@ -156,12 +162,34 @@ final class AppUpdatesService: ObservableObject {
                 && packageResult.onlineCoverageAvailable
                 ? AppUpdatesSupport.onlineCatalogCandidates(apps: apps, coveredPaths: coveredPaths)
                 : []
-            _ = storeCandidates
-            _ = onlineCandidates
+            let os = ProcessInfo.processInfo.operatingSystemVersion
+            let operatingSystemVersion = "\(os.majorVersion).\(os.minorVersion).\(os.patchVersion)"
             let group = DispatchGroup()
-            let storeResult = SourceResult(items: [], available: true)
+            var storeResult = SourceResult(items: [], available: true)
             let feedResult = SourceResult(items: [], available: true)
-            let onlineResult = SourceResult(items: [], available: true)
+            var onlineResult = SourceResult(
+                items: [],
+                available: !includeOnlineCatalog || packageResult.onlineCoverageAvailable,
+                uncheckedApps: includeOnlineCatalog && !packageResult.onlineCoverageAvailable
+                    ? AppUpdatesSupport.onlineCatalogCandidates(apps: apps, coveredPaths: coveredPaths)
+                    : [])
+
+            group.enter()
+            self.storeFindings(for: storeCandidates,
+                               country: country,
+                               operatingSystemVersion: operatingSystemVersion) {
+                storeResult = $0
+                group.leave()
+            }
+            if includeOnlineCatalog, onlineResult.available {
+                group.enter()
+                self.onlineCatalogFindings(for: onlineCandidates,
+                                           operatingSystemVersion: operatingSystemVersion,
+                                           forceRefresh: !automatic) {
+                    onlineResult = $0
+                    group.leave()
+                }
+            }
             group.notify(queue: self.workQueue) {
                 DispatchQueue.main.async {
                     guard generation == self.scanGeneration else { return }
@@ -308,13 +336,125 @@ final class AppUpdatesService: ObservableObject {
 
     // MARK: - App Store source
 
-    // MARK: - Source results
+    private func storeFindings(for candidates: [AppUpdatesSupport.InstalledApp],
+                               country: String?,
+                               operatingSystemVersion: String,
+                               completion: @escaping (SourceResult) -> Void) {
+        storeEntries(for: candidates, country: country, preferStoreIDs: true) { entries in
+            let missing = candidates.filter { entries[$0.bundleID] == nil && $0.storeID != nil }
+            self.storeEntries(for: missing, country: country, preferStoreIDs: false) { fallback in
+                let merged = entries.merging(fallback) { first, _ in first }
+                completion(SourceResult(
+                    items: AppUpdatesSupport.appStoreUpdates(apps: candidates,
+                                                            storeVersions: merged,
+                                                            operatingSystemVersion: operatingSystemVersion),
+                    available: AppUpdatesSupport.hasStoreCoverage(bundleIDs: candidates.map(\.bundleID),
+                                                                 entries: merged),
+                    uncheckedApps: candidates.filter { merged[$0.bundleID] == nil }))
+            }
+        }
+    }
+
+    private func storeEntries(for candidates: [AppUpdatesSupport.InstalledApp],
+                              country: String?, preferStoreIDs: Bool,
+                              completion: @escaping ([String: AppUpdatesSupport.StoreEntry]) -> Void) {
+        guard !candidates.isEmpty else {
+            completion([:])
+            return
+        }
+        let groups = Dictionary(grouping: candidates) { preferStoreIDs && $0.storeID != nil }
+        var merged: [String: AppUpdatesSupport.StoreEntry] = [:]
+        let group = DispatchGroup()
+        let lock = NSLock()
+
+        for (useIDs, apps) in groups {
+            for start in stride(from: 0, to: apps.count, by: AppUpdatesSupport.storeLookupBatchSize) {
+                let batch = Array(apps[start..<min(start + AppUpdatesSupport.storeLookupBatchSize, apps.count)])
+                let lookup = useIDs
+                    ? AppUpdatesSupport.storeIDLookupURL(ids: batch.compactMap(\.storeID), country: country)
+                    : AppUpdatesSupport.storeLookupURL(bundleIDs: batch.map(\.bundleID), country: country)
+                guard let url = lookup else { continue }
+                group.enter()
+                // Sealed: read-only GET to itunes.apple.com /
+                // uclient-api.itunes.apple.com through the policy wrapper.
+                SealedURLSession.get(URLRequest(url: url)) { data, response, error in
+                    defer { group.leave() }
+                    let body = error == nil ? data : nil
+                    let statusCode = (response as? HTTPURLResponse)?.statusCode
+                    let entries = useIDs
+                        ? AppUpdatesSupport.storeMetadataResponse(body, statusCode: statusCode)
+                        : AppUpdatesSupport.storeLookupResponse(body, statusCode: statusCode)
+                    lock.lock()
+                    merged.merge(entries) { _, new in new }
+                    lock.unlock()
+                }
+            }
+        }
+
+        group.notify(queue: workQueue) { completion(merged) }
+    }
+
+    // MARK: - Online catalog source
 
     private struct SourceResult {
         let items: [AppUpdatesSupport.Item]
         let available: Bool
         var checkedPaths: Set<String> = []
         var uncheckedApps: [AppUpdatesSupport.InstalledApp] = []
+    }
+
+    private static let onlineCatalogCacheLifetime: TimeInterval = 60 * 60
+
+    private func onlineCatalogFindings(for candidates: [AppUpdatesSupport.InstalledApp],
+                                       operatingSystemVersion: String,
+                                       forceRefresh: Bool,
+                                       completion: @escaping (SourceResult) -> Void) {
+        guard !candidates.isEmpty else {
+            completion(SourceResult(items: [], available: true))
+            return
+        }
+
+        let now = Date()
+        if !forceRefresh, let cache = onlineCatalogCache {
+            let age = now.timeIntervalSince(cache.loadedAt)
+            if age >= 0, age < Self.onlineCatalogCacheLifetime {
+                completion(onlineResult(candidates: candidates,
+                                        catalog: cache.entries,
+                                        operatingSystemVersion: operatingSystemVersion))
+                return
+            }
+        }
+
+        // Sealed: read-only GET of the public cask catalog on formulae.brew.sh
+        // through the policy wrapper (the session keeps no disk cache; the
+        // hour-long in-memory cache above stands in for it).
+        SealedURLSession.get(URLRequest(url: AppUpdatesSupport.onlineCatalogURL)) { [weak self] data, response, _ in
+            guard let self else { return }
+            let statusCode = (response as? HTTPURLResponse)?.statusCode
+            self.workQueue.async {
+                guard let entries = AppUpdatesSupport.parseOnlineCatalogResponse(
+                    data, statusCode: statusCode) else {
+                    completion(SourceResult(items: [], available: false, uncheckedApps: candidates))
+                    return
+                }
+                self.onlineCatalogCache = (Date(), entries)
+                completion(self.onlineResult(candidates: candidates,
+                                             catalog: entries,
+                                             operatingSystemVersion: operatingSystemVersion))
+            }
+        }
+    }
+
+    private func onlineResult(candidates: [AppUpdatesSupport.InstalledApp],
+                              catalog: [AppUpdatesSupport.CatalogEntry],
+                              operatingSystemVersion: String) -> SourceResult {
+        SourceResult(
+            items: AppUpdatesSupport.onlineCatalogUpdates(
+                apps: candidates,
+                catalog: catalog,
+                operatingSystemVersion: operatingSystemVersion,
+                ignoredTokens: Self.ownPackageTokens),
+            available: true)
     }
 
     // MARK: - Acting on the list

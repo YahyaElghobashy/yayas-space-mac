@@ -10,6 +10,9 @@ struct AppUpdatesSettings: View {
     private var frequencyRaw = AppUpdatesSupport.CheckFrequency.off.rawValue
     @AppStorage(DefaultsKey.appUpdatesNotify) private var notify = true
     @AppStorage(DefaultsKey.appUpdatesIncludeHomebrewApps) private var includeHomebrewApps = true
+    @AppStorage(DefaultsKey.appUpdatesIncludeAppStore) private var includeAppStore = true
+    @AppStorage(DefaultsKey.appUpdatesIncludeOnlineCatalog)
+    private var includeOnlineCatalog = true
     @AppStorage(DefaultsKey.panelUtilityAppUpdates) private var showInPanel = true
 
     private var text: AppUpdateStrings { FeatureStrings.appUpdates(l10n.language) }
@@ -51,8 +54,25 @@ struct AppUpdatesSettings: View {
                     .onChange(of: includeHomebrewApps) { _, _ in
                         updates.sourceSelectionDidChange()
                     }
-                // Sealed fork: the App Store and online catalog sources are
-                // removed; the package manager is the only source left.
+                Toggle(text.includeStoreToggle, isOn: $includeAppStore)
+                    .disabled(includeAppStore && enabledSourceCount == 1)
+                    .onChange(of: includeAppStore) { _, _ in
+                        updates.sourceSelectionDidChange()
+                    }
+                Text(text.includeStoreCaption)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                Toggle(text.includeOnlineToggle, isOn: $includeOnlineCatalog)
+                    .disabled(includeOnlineCatalog && enabledSourceCount == 1)
+                    .onChange(of: includeOnlineCatalog) { _, _ in
+                        updates.sourceSelectionDidChange()
+                    }
+                // Sealed fork: this source is the public Homebrew cask catalog
+                // only; the upstream "checks directly with app developers"
+                // (publisher feed) path is not in this build.
+                Text(SealedBuild.onlineCatalogCaption)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
             }
 
             Section {
@@ -74,7 +94,7 @@ struct AppUpdatesSettings: View {
     }
 
     private var enabledSourceCount: Int {
-        [includeHomebrewApps].filter { $0 }.count
+        [includeHomebrewApps, includeAppStore, includeOnlineCatalog].filter { $0 }.count
     }
 
     private func nextCheckText(_ date: Date) -> String {
