@@ -187,11 +187,12 @@ Without `actool` (full Xcode 26+) the adaptive icon catalog is skipped and the D
 
 ## Icon and brand
 
-The icon is a placeholder drawn from code: a rounded square on paper `#F8F5F0` with a heavy system-font "Y" in plum `#46216B`.
+The icon is the Yaya's Space mark: a posterized face inside a dark planet with a Saturn ring, on a paper `#F8F5F0` rounded square.
 
-- `Tools/MakeIcon.swift` renders the `.iconset`, `AppIcon.icns`, the 26×20 pt menu bar template glyph and `BrandMark.png` at build time. Change the two colours or the glyph there, or replace `renderAppIcon(px:)` with a draw of your own 1024×1024 master.
-- `Resources/Brand/AppIcon.icon` is the Icon Composer catalog with the matching vector mark (`Assets/yayas-space-brandmark.svg`), used only when `actool` is available.
-- `docs/assets/readme/logo.svg` and `logo-dark.svg` are the README wordmarks; `icon.png` is the 256 px render.
+- `Resources/Brand/AppIcon-Source.png` is the 1024×1024 master (the sticker, centred with margin, transparent background); `Resources/Brand/BrandMark-Source.png` is the same sticker tightly trimmed.
+- `Tools/MakeIcon.swift` renders everything from those two files at build time with CoreGraphics and ImageIO only: the `.iconset` and `AppIcon.icns` (sticker on the paper tile, corners at 22.5 % of the side), the 26×20 pt menu bar template glyph (the sticker's silhouette, black on transparent, from its alpha channel) and `BrandMark.png` (the same silhouette in white, tinted in-app). Regenerate with `swift Tools/MakeIcon.swift build/AppIcon.iconset`.
+- `Resources/Brand/AppIcon.icon` is the Icon Composer catalog with the sticker as its layer (`Assets/yayas-space-brandmark.png`), used only when `actool` is available.
+- `docs/assets/readme/logo.svg` and `logo-dark.svg` are the README wordmarks (the mark embedded as a small PNG); `icon.png` is the 256 px render.
 
 The upstream icon and logo were reserved brand material and are not in this repository.
 

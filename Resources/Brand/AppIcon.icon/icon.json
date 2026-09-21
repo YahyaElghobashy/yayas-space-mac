@@ -16,22 +16,18 @@
         {
           "fill-specializations": [
             {
-              "appearance": "dark",
-              "value": "system-light"
-            },
-            {
               "appearance": "tinted",
               "value": "system-light"
             }
           ],
           "hidden": false,
-          "image-name": "yayas-space-brandmark.svg",
+          "image-name": "yayas-space-brandmark.png",
           "name": "YayasSpaceMark",
           "position": {
-            "scale": 1.25,
+            "scale": 1.0,
             "translation-in-points": [
-              2.2516667286254233e-05,
-              3.9609225268577575e-06
+              0,
+              0
             ]
           }
         }

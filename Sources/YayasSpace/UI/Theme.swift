@@ -186,8 +186,9 @@ func appDelegate() -> AppDelegate? {
     NSApp.delegate as? AppDelegate
 }
 
-/// The Yaya's Space mark: the "Y" glyph Tools/MakeIcon.swift renders into
-/// BrandMark.png at build time (a template image), tintable for any surface.
+/// The Yaya's Space mark: the face-and-ring sticker's silhouette that
+/// Tools/MakeIcon.swift renders into BrandMark.png at build time (a template
+/// image), tintable for any surface.
 struct BrandMark: View {
     var width: CGFloat
     var tint: Color = .white
