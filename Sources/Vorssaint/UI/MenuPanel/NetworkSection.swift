@@ -8,14 +8,12 @@ import SwiftUI
 struct NetworkSection: View {
     @ObservedObject private var l10n = L10n.shared
     @ObservedObject private var monitor = SystemMonitor.shared
-    @ObservedObject private var speed = SpeedTest.shared
     @Environment(\.colorScheme) private var colorScheme
     var collapsible = true
     @AppStorage(DefaultsKey.monitorGraphNetwork) private var showGraph = true
     @AppStorage(DefaultsKey.monitorNetSpeed) private var netSpeed = true
     @AppStorage(DefaultsKey.monitorNetApps) private var netApps = true
     @AppStorage(DefaultsKey.monitorNetTotals) private var netTotals = true
-    @AppStorage(DefaultsKey.monitorNetTest) private var netTest = true
     @AppStorage(DefaultsKey.panelNetworkOrder) private var networkOrderRaw = ""
     @State private var draggingBlock: Block?
     @State private var appRows: [ProcessUsage] = []
@@ -76,7 +74,7 @@ struct NetworkSection: View {
         }
     }
 
-    private enum Block: String, PanelOrderItem { case speed, apps, totals, test }
+    private enum Block: String, PanelOrderItem { case speed, apps, totals }
 
     private var visibleBlocks: [Block] {
         orderedBlocks.filter(isVisible)
@@ -104,7 +102,6 @@ struct NetworkSection: View {
         case .speed: return netSpeed
         case .apps: return netApps
         case .totals: return netTotals
-        case .test: return netTest
         }
     }
 
@@ -114,7 +111,6 @@ struct NetworkSection: View {
         netSpeed = true
         netApps = true
         netTotals = true
-        netTest = true
     }
 
     @ViewBuilder
@@ -123,7 +119,6 @@ struct NetworkSection: View {
         case .speed: speedBlock(editing: editing)
         case .apps: appUsageBlock(editing: editing)
         case .totals: totalsRow(editing: editing)
-        case .test: speedTestRow(editing: editing)
         }
     }
 
@@ -248,61 +243,6 @@ struct NetworkSection: View {
                 }
             }
         }
-    }
-
-    /// On-demand internet speed test (latency, download, upload).
-    @ViewBuilder
-    private func speedTestRow(editing: Bool) -> some View {
-        if !netTest {
-            PanelHiddenItemRow(title: l10n.s.monitorItemNetTest,
-                               systemImage: "gauge.with.dots.needle.67percent",
-                               isVisible: $netTest)
-        } else {
-            VStack(alignment: .leading, spacing: 6) {
-                HStack(spacing: 8) {
-                    if speed.isRunning {
-                        ProgressView().controlSize(.small)
-                        Text(l10n.s.speedTestTesting)
-                            .font(.system(size: 11))
-                            .foregroundStyle(.secondary)
-                    } else {
-                        Button {
-                            speed.start()
-                        } label: {
-                            Label(speed.downloadMbps == nil ? l10n.s.speedTestRun : l10n.s.speedTestAgain,
-                                  systemImage: "gauge.with.dots.needle.67percent")
-                                .font(.system(size: 11))
-                        }
-                        .buttonStyle(.bordered)
-                        .controlSize(.small)
-                    }
-                    Spacer()
-                    if let down = speed.downloadMbps, let up = speed.uploadMbps {
-                        Text("↓\(mbps(down)) ↑\(mbps(up)) Mbps")
-                            .font(.system(size: 11, weight: .semibold))
-                            .monospacedDigit()
-                            .contentTransition(.numericText())
-                    }
-                    if editing {
-                        PanelInlineHideButton(isVisible: $netTest)
-                    }
-                }
-                if case .failed = speed.phase {
-                    Text(l10n.s.speedTestFailed)
-                        .font(.system(size: 10))
-                        .foregroundStyle(PanelMetricColor.orange(for: colorScheme))
-                } else if let latency = speed.latencyMs {
-                    Text("\(l10n.s.speedTestLatency): \(Int(latency.rounded())) ms")
-                        .font(.system(size: 10))
-                        .foregroundStyle(.tertiary)
-                }
-            }
-        }
-    }
-
-    private func mbps(_ value: Double) -> String {
-        value >= 100 ? String(format: "%.0f", locale: MetricFormat.locale, value)
-                     : String(format: "%.1f", locale: MetricFormat.locale, value)
     }
 
     private func startNetworkMonitoringIfNeeded() {

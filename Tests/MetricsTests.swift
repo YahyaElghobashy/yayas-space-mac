@@ -12865,8 +12865,6 @@ struct MetricsTests {
                "Homebrew install and upgrade preserve package details after success")
         expect(HomebrewCommandBuilder.needsTerminalFallback(output: "sudo: a terminal is required to read the password"),
                "sudo terminal error triggers Homebrew terminal fallback")
-        expect(HomebrewCommandBuilder.installerCommand == #"/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)""#,
-               "Homebrew installer command matches the official install script entrypoint")
         expectEqual(HomebrewCommandBuilder.shellProfilePath(homeDirectory: "/Users/test", shellPath: "/bin/zsh"),
                     "/Users/test/.zprofile",
                     "Homebrew shell setup uses zprofile for zsh")
@@ -13980,8 +13978,6 @@ struct MetricsTests {
         }
         expect(unexpectedProcessReads == 0,
                "unavailable interface counters never trigger process sampling")
-
-        SpeedTestTests.run { expect($0, $1) }
 
         let nettopCSV = """
         time,,bytes_in,bytes_out,

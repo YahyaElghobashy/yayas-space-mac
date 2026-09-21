@@ -141,7 +141,6 @@ struct ActivityMonitorButton: View {
 struct MetricDetailView: View {
     @ObservedObject private var l10n = L10n.shared
     @ObservedObject private var monitor = SystemMonitor.shared
-    @ObservedObject private var speed = SpeedTest.shared
     @Environment(\.colorScheme) private var colorScheme
     @AppStorage(DefaultsKey.temperatureUnit) private var temperatureUnit = TemperatureUnit.celsius.rawValue
     @AppStorage(DefaultsKey.monitorInterval) private var monitorInterval = 2
@@ -157,9 +156,6 @@ struct MetricDetailView: View {
         VStack(alignment: .leading, spacing: 10) {
             summaryCard
             detailCard
-            if kind == .network {
-                speedTestCard
-            }
             if kind.processKind != nil {
                 processCard
             }
@@ -285,45 +281,6 @@ struct MetricDetailView: View {
         VStack(alignment: .leading, spacing: 7) {
             ForEach(detailRows) { row in
                 detailRow(row)
-            }
-        }
-        .panelCard()
-    }
-
-    private var speedTestCard: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            HStack(spacing: 8) {
-                if speed.isRunning {
-                    ProgressView().controlSize(.small)
-                    Text(l10n.s.speedTestTesting)
-                        .font(.system(size: 11))
-                        .foregroundStyle(.secondary)
-                } else {
-                    Button {
-                        speed.start()
-                    } label: {
-                        Label(speed.downloadMbps == nil ? l10n.s.speedTestRun : l10n.s.speedTestAgain,
-                              systemImage: "gauge.with.dots.needle.67percent")
-                            .font(.system(size: 11))
-                    }
-                    .buttonStyle(.bordered)
-                    .controlSize(.small)
-                }
-                Spacer()
-                if let down = speed.downloadMbps, let up = speed.uploadMbps {
-                    Text("↓\(mbps(down)) ↑\(mbps(up)) Mbps")
-                        .font(.system(size: 11, weight: .semibold))
-                        .monospacedDigit()
-                }
-            }
-            if case .failed = speed.phase {
-                Text(l10n.s.speedTestFailed)
-                    .font(.system(size: 10))
-                    .foregroundStyle(PanelMetricColor.orange(for: colorScheme))
-            } else if let latency = speed.latencyMs {
-                Text("\(l10n.s.speedTestLatency): \(Int(latency.rounded())) ms")
-                    .font(.system(size: 10))
-                    .foregroundStyle(.tertiary)
             }
         }
         .panelCard()
@@ -745,11 +702,6 @@ struct MetricDetailView: View {
         if power.externalConnected { return l10n.s.powerPluggedIn }
         if power.hasBattery { return l10n.s.powerOnBattery }
         return l10n.s.powerUnavailable
-    }
-
-    private func mbps(_ value: Double) -> String {
-        value >= 100 ? String(format: "%.0f", locale: MetricFormat.locale, value)
-                     : String(format: "%.1f", locale: MetricFormat.locale, value)
     }
 
     private static let memoryFormatter: ByteCountFormatter = {
