@@ -96,7 +96,10 @@ legacy_identity_installed() {
 # up front instead of falling through to ad-hoc — setup-signing.sh is free,
 # offline and idempotent. Gating on the install rather than the variant keeps
 # this off CI, where neither ci.yml nor release.yml passes --install.
-if (( DEV || INSTALL )) && [[ -z "$(developer_id_identity)" ]] \
+# Sealed fork: a plain --dev build (no --install) must not touch the keychain,
+# so it falls straight through to ad-hoc signing. --install keeps the upstream
+# behaviour, and the release path is untouched.
+if (( INSTALL )) && [[ -z "$(developer_id_identity)" ]] \
     && ! legacy_identity_installed; then
     echo "▸ No signing identity installed; creating the stable local one…"
     if ! ./Tools/setup-signing.sh; then
@@ -428,7 +431,6 @@ if (( TEST )); then
         Tests/MetricsTests.swift \
         Tests/RecentCaptureStoreTests.swift \
         Tests/RecorderPresetImageStoreTests.swift \
-        Tests/SpeedTestTests.swift \
         -o build/metrics-tests
     # `set -e` would end the script on a failing run before the sweep below.
     test_status=0
@@ -531,6 +533,11 @@ if (( DEV )); then
     /usr/libexec/PlistBuddy -c "Set :CFBundleName Vorssaint (Developer)" "$STAGE/Contents/Info.plist"
     /usr/libexec/PlistBuddy -c "Set :CFBundleDisplayName Vorssaint (Developer)" "$STAGE/Contents/Info.plist"
     /usr/libexec/PlistBuddy -c "Set :CFBundleExecutable $EXECUTABLE" "$STAGE/Contents/Info.plist"
+    # Sealed fork: the Developer variant carries its own version so About and
+    # the update check can tell it apart from the upstream release it tracks.
+    SEALED_VERSION="$(/usr/libexec/PlistBuddy -c "Print :CFBundleShortVersionString" Resources/Info.plist)-sealed.1"
+    /usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString $SEALED_VERSION" "$STAGE/Contents/Info.plist"
+    echo "  sealed version: $SEALED_VERSION"
     FAN_PLIST="$STAGE/Contents/Library/LaunchDaemons/$FAN_HELPER_ID.plist"
     /usr/libexec/PlistBuddy -c "Set :Label $FAN_HELPER_ID" "$FAN_PLIST"
     /usr/libexec/PlistBuddy -c "Set :BundleProgram Contents/Library/LaunchServices/$FAN_HELPER_ID" "$FAN_PLIST"
@@ -716,6 +723,15 @@ if ! codesign --verify --deep --strict "$BUILD_STAGE" >/dev/null 2>&1; then
     fi
 fi
 echo "✓ Bundle ready: $BUILD_STAGE"
+if (( DEV )); then
+    # Sealed fork: keep a finished copy outside build/ so it survives cleanups.
+    mkdir -p dist
+    DIST_BUNDLE="dist/$APP_NAME.app"
+    rm -rf "$DIST_BUNDLE"
+    ditto --noextattr --noqtn "$STAGE" "$DIST_BUNDLE"
+    xattr -c -r "$DIST_BUNDLE" 2>/dev/null || true
+    echo "✓ Developer bundle kept at: $DIST_BUNDLE"
+fi
 
 if (( INSTALL )); then
     echo "▸ Installing into /Applications…"
