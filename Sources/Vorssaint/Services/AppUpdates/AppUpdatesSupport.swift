@@ -56,7 +56,6 @@ enum AppUpdatesSupport {
         let isFromAppStore: Bool
         var buildVersion: String = ""
         var storeID: String? = nil
-        var updateFeed: AppUpdateFeedSupport.Feed? = nil
     }
 
     /// One app's current version in the store.
@@ -267,31 +266,6 @@ enum AppUpdatesSupport {
     /// Mac is a couple of requests instead of one per app.
     static let storeLookupBatchSize = 20
 
-    static func storeLookupURL(bundleIDs: [String], country: String?) -> URL? {
-        guard !bundleIDs.isEmpty else { return nil }
-        var components = URLComponents(string: "https://itunes.apple.com/lookup")
-        var query = [URLQueryItem(name: "bundleId", value: bundleIDs.joined(separator: ",")),
-                     URLQueryItem(name: "entity", value: "macSoftware")]
-        if let country, !country.isEmpty {
-            query.append(URLQueryItem(name: "country", value: country))
-        }
-        components?.queryItems = query
-        return components?.url
-    }
-
-    static func storeIDLookupURL(ids: [String], country: String?) -> URL? {
-        guard !ids.isEmpty, ids.allSatisfy({ !$0.isEmpty && $0.allSatisfy { $0.isASCII && $0.isNumber } }) else { return nil }
-        var components = URLComponents(string: "https://uclient-api.itunes.apple.com/WebObjects/MZStorePlatform.woa/wa/lookup")
-        var query = [URLQueryItem(name: "id", value: ids.joined(separator: ",")),
-                     URLQueryItem(name: "version", value: "2"),
-                     URLQueryItem(name: "p", value: "mdm-lockup"),
-                     URLQueryItem(name: "caller", value: "MDM"),
-                     URLQueryItem(name: "platform", value: "macappstore")]
-        if let country, !country.isEmpty { query.append(URLQueryItem(name: "cc", value: country)) }
-        components?.queryItems = query
-        return components?.url
-    }
-
     /// The platform-specific lookup supplies the Mac build and Mac minimum
     /// OS even for a universal listing whose generic result describes mobile.
     static func storeMetadataResponse(_ data: Data?, statusCode: Int?) -> [String: StoreEntry] {
@@ -378,8 +352,6 @@ enum AppUpdatesSupport {
     }
 
     // MARK: - Online catalog source
-
-    static let onlineCatalogURL = URL(string: "https://formulae.brew.sh/api/cask.json")!
 
     /// Decodes only catalog fields that can prove an exact app-bundle match,
     /// a comparable version and macOS compatibility. Unknown fields remain

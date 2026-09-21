@@ -37,19 +37,6 @@ final class AppUpdatesService: ObservableObject {
     @Published private(set) var lastError: String?
 
     private let workQueue = DispatchQueue(label: "com.vorssaint.appupdates", qos: .utility)
-    private lazy var lookupSession: URLSession = {
-        let configuration = URLSessionConfiguration.ephemeral
-        configuration.timeoutIntervalForRequest = 10
-        configuration.timeoutIntervalForResource = 20
-        return URLSession(configuration: configuration)
-    }()
-    private lazy var catalogSession: URLSession = {
-        let configuration = URLSessionConfiguration.default
-        configuration.requestCachePolicy = .useProtocolCachePolicy
-        configuration.timeoutIntervalForRequest = 10
-        configuration.timeoutIntervalForResource = 20
-        return URLSession(configuration: configuration)
-    }()
     private var timer: Timer?
     private var wakeObserver: NSObjectProtocol?
     private var scanGeneration = 0
@@ -59,7 +46,6 @@ final class AppUpdatesService: ObservableObject {
     /// The person was sent elsewhere to finish an update, so the list is
     /// about to be wrong until it is read again.
     private(set) var updateHandoffPending = false
-    private var onlineCatalogCache: (loadedAt: Date, entries: [AppUpdatesSupport.CatalogEntry])?
     /// Alive only while an upgrade this service started is running, so the
     /// list refreshes itself even when no window is on screen to notice.
     private var upgradeObserver: AnyCancellable?
@@ -148,14 +134,15 @@ final class AppUpdatesService: ObservableObject {
         let generation = scanGeneration
         let includeHomebrewApps = UserDefaults.standard.bool(
             forKey: DefaultsKey.appUpdatesIncludeHomebrewApps)
-        let includeAppStore = UserDefaults.standard.bool(forKey: DefaultsKey.appUpdatesIncludeAppStore)
-        let includeOnlineCatalog = UserDefaults.standard.bool(
-            forKey: DefaultsKey.appUpdatesIncludeOnlineCatalog)
-        let country = Locale.current.region?.identifier
+        // Sealed fork: the App Store lookup, the public cask catalog and the
+        // publisher feeds were online sources and are gone. Only the local
+        // package manager (`brew`) answers; the preferences are ignored.
+        let includeAppStore = false
+        let includeOnlineCatalog = false
 
         workQueue.async { [weak self] in
             guard let self else { return }
-            let apps = Self.scanInstalledApps(includePublisherFeeds: includeOnlineCatalog)
+            let apps = Self.scanInstalledApps()
             let packageResult = includeHomebrewApps || includeOnlineCatalog
                 ? self.packageManagerFindings(apps: apps, includeUpdates: includeHomebrewApps)
                 : PackageResult(items: [], coveredPaths: [], available: true,
@@ -169,40 +156,12 @@ final class AppUpdatesService: ObservableObject {
                 && packageResult.onlineCoverageAvailable
                 ? AppUpdatesSupport.onlineCatalogCandidates(apps: apps, coveredPaths: coveredPaths)
                 : []
-            let os = ProcessInfo.processInfo.operatingSystemVersion
-            let operatingSystemVersion = "\(os.majorVersion).\(os.minorVersion).\(os.patchVersion)"
+            _ = storeCandidates
+            _ = onlineCandidates
             let group = DispatchGroup()
-            var storeResult = SourceResult(items: [], available: true)
-            var feedResult = SourceResult(items: [], available: true)
-            var onlineResult = SourceResult(
-                items: [],
-                available: !includeOnlineCatalog || packageResult.onlineCoverageAvailable,
-                uncheckedApps: includeOnlineCatalog && !packageResult.onlineCoverageAvailable
-                    ? AppUpdatesSupport.onlineCatalogCandidates(apps: apps, coveredPaths: coveredPaths)
-                    : [])
-
-            group.enter()
-            self.storeFindings(for: storeCandidates,
-                               country: country,
-                               operatingSystemVersion: operatingSystemVersion) {
-                storeResult = $0
-                group.leave()
-            }
-            if includeOnlineCatalog, onlineResult.available {
-                group.enter()
-                self.publisherFindings(for: onlineCandidates,
-                                       operatingSystemVersion: operatingSystemVersion) {
-                    feedResult = $0
-                    group.leave()
-                }
-                group.enter()
-                self.onlineCatalogFindings(for: onlineCandidates,
-                                           operatingSystemVersion: operatingSystemVersion,
-                                           forceRefresh: !automatic) {
-                    onlineResult = $0
-                    group.leave()
-                }
-            }
+            let storeResult = SourceResult(items: [], available: true)
+            let feedResult = SourceResult(items: [], available: true)
+            let onlineResult = SourceResult(items: [], available: true)
             group.notify(queue: self.workQueue) {
                 DispatchQueue.main.async {
                     guard generation == self.scanGeneration else { return }
@@ -349,187 +308,13 @@ final class AppUpdatesService: ObservableObject {
 
     // MARK: - App Store source
 
-    private func storeFindings(for candidates: [AppUpdatesSupport.InstalledApp],
-                               country: String?,
-                               operatingSystemVersion: String,
-                               completion: @escaping (SourceResult) -> Void) {
-        storeEntries(for: candidates, country: country, preferStoreIDs: true) { entries in
-            let missing = candidates.filter { entries[$0.bundleID] == nil && $0.storeID != nil }
-            self.storeEntries(for: missing, country: country, preferStoreIDs: false) { fallback in
-                let merged = entries.merging(fallback) { first, _ in first }
-                completion(SourceResult(
-                    items: AppUpdatesSupport.appStoreUpdates(apps: candidates,
-                                                            storeVersions: merged,
-                                                            operatingSystemVersion: operatingSystemVersion),
-                    available: AppUpdatesSupport.hasStoreCoverage(bundleIDs: candidates.map(\.bundleID),
-                                                                 entries: merged),
-                    uncheckedApps: candidates.filter { merged[$0.bundleID] == nil }))
-            }
-        }
-    }
-
-    private func storeEntries(for candidates: [AppUpdatesSupport.InstalledApp],
-                              country: String?, preferStoreIDs: Bool,
-                              completion: @escaping ([String: AppUpdatesSupport.StoreEntry]) -> Void) {
-        guard !candidates.isEmpty else {
-            completion([:])
-            return
-        }
-        let groups = Dictionary(grouping: candidates) { preferStoreIDs && $0.storeID != nil }
-        var merged: [String: AppUpdatesSupport.StoreEntry] = [:]
-        let group = DispatchGroup()
-        let lock = NSLock()
-
-        for (useIDs, apps) in groups {
-            for start in stride(from: 0, to: apps.count, by: AppUpdatesSupport.storeLookupBatchSize) {
-                let batch = Array(apps[start..<min(start + AppUpdatesSupport.storeLookupBatchSize, apps.count)])
-                let lookup = useIDs
-                    ? AppUpdatesSupport.storeIDLookupURL(ids: batch.compactMap(\.storeID), country: country)
-                    : AppUpdatesSupport.storeLookupURL(bundleIDs: batch.map(\.bundleID), country: country)
-                guard let url = lookup else { continue }
-                group.enter()
-                lookupSession.dataTask(with: url) { data, response, error in
-                    defer { group.leave() }
-                    let body = error == nil ? data : nil
-                    let statusCode = (response as? HTTPURLResponse)?.statusCode
-                    let entries = useIDs
-                        ? AppUpdatesSupport.storeMetadataResponse(body, statusCode: statusCode)
-                        : AppUpdatesSupport.storeLookupResponse(body, statusCode: statusCode)
-                    lock.lock()
-                    merged.merge(entries) { _, new in new }
-                    lock.unlock()
-                }.resume()
-            }
-        }
-
-        group.notify(queue: workQueue) { completion(merged) }
-    }
-
-    // MARK: - Online catalog source
+    // MARK: - Source results
 
     private struct SourceResult {
         let items: [AppUpdatesSupport.Item]
         let available: Bool
         var checkedPaths: Set<String> = []
         var uncheckedApps: [AppUpdatesSupport.InstalledApp] = []
-    }
-
-    private static let onlineCatalogCacheLifetime: TimeInterval = 60 * 60
-
-    private func publisherFindings(for candidates: [AppUpdatesSupport.InstalledApp],
-                                   operatingSystemVersion: String,
-                                   completion: @escaping (SourceResult) -> Void) {
-        var grouped: [AppUpdateFeedSupport.Feed: [AppUpdatesSupport.InstalledApp]] = [:]
-        for app in candidates {
-            if let feed = app.updateFeed { grouped[feed, default: []].append(app) }
-        }
-        let feeds = Array(grouped)
-        var items: [AppUpdatesSupport.Item] = []
-        var checkedPaths = Set<String>()
-        var complete = true
-        let deadline = Date().addingTimeInterval(60)
-        var kernelBytes = [CChar](repeating: 0, count: 256)
-        var kernelSize = kernelBytes.count
-        let kernelVersion = sysctlbyname("kern.osrelease", &kernelBytes, &kernelSize, nil, 0) == 0
-            ? String(cString: kernelBytes) : ""
-        #if arch(arm64)
-        let architecture = "arm64"
-        #else
-        let architecture = "x86_64"
-        #endif
-
-        // Four at a time, coalesced by URL, with a ceiling for the whole pass.
-        // All accumulated results are confined to workQueue.
-        func checkBatch(_ start: Int) {
-            guard start < feeds.count, Date() < deadline else {
-                completion(SourceResult(items: items, available: complete && start >= feeds.count,
-                                        checkedPaths: checkedPaths,
-                                        uncheckedApps: candidates.filter {
-                                            $0.updateFeed != nil && !checkedPaths.contains($0.path)
-                                        }))
-                return
-            }
-            let end = min(start + 4, feeds.count)
-            let group = DispatchGroup()
-            for (feed, apps) in feeds[start..<end] {
-                group.enter()
-                AppUpdateFeedLoader.load(feed.url) { data in
-                    self.workQueue.async {
-                        defer { group.leave() }
-                        guard let data, let releases = AppUpdateFeedSupport.releases(data: data, format: feed.format) else {
-                            complete = false
-                            return
-                        }
-                        for app in apps {
-                            guard AppUpdateFeedSupport.comparableInstalledVersion(app, format: feed.format) != nil else {
-                                complete = false
-                                continue
-                            }
-                            checkedPaths.insert(app.path)
-                            if let item = AppUpdateFeedSupport.update(
-                                app: app, releases: releases, format: feed.format,
-                                operatingSystemVersion: operatingSystemVersion,
-                                kernelVersion: kernelVersion, architecture: architecture) {
-                                items.append(item)
-                            }
-                        }
-                    }
-                }
-            }
-            group.notify(queue: self.workQueue) { checkBatch(end) }
-        }
-        checkBatch(0)
-    }
-
-    private func onlineCatalogFindings(for candidates: [AppUpdatesSupport.InstalledApp],
-                                       operatingSystemVersion: String,
-                                       forceRefresh: Bool,
-                                       completion: @escaping (SourceResult) -> Void) {
-        guard !candidates.isEmpty else {
-            completion(SourceResult(items: [], available: true))
-            return
-        }
-
-        let now = Date()
-        if !forceRefresh, let cache = onlineCatalogCache {
-            let age = now.timeIntervalSince(cache.loadedAt)
-            if age >= 0, age < Self.onlineCatalogCacheLifetime {
-                completion(onlineResult(candidates: candidates,
-                                        catalog: cache.entries,
-                                        operatingSystemVersion: operatingSystemVersion))
-                return
-            }
-        }
-
-        var request = URLRequest(url: AppUpdatesSupport.onlineCatalogURL)
-        if forceRefresh { request.cachePolicy = .reloadIgnoringLocalCacheData }
-        catalogSession.dataTask(with: request) { [weak self] data, response, _ in
-            guard let self else { return }
-            let statusCode = (response as? HTTPURLResponse)?.statusCode
-            self.workQueue.async {
-                guard let entries = AppUpdatesSupport.parseOnlineCatalogResponse(
-                    data, statusCode: statusCode) else {
-                    completion(SourceResult(items: [], available: false, uncheckedApps: candidates))
-                    return
-                }
-                self.onlineCatalogCache = (Date(), entries)
-                completion(self.onlineResult(candidates: candidates,
-                                             catalog: entries,
-                                             operatingSystemVersion: operatingSystemVersion))
-            }
-        }.resume()
-    }
-
-    private func onlineResult(candidates: [AppUpdatesSupport.InstalledApp],
-                              catalog: [AppUpdatesSupport.CatalogEntry],
-                              operatingSystemVersion: String) -> SourceResult {
-        SourceResult(
-            items: AppUpdatesSupport.onlineCatalogUpdates(
-                apps: candidates,
-                catalog: catalog,
-                operatingSystemVersion: operatingSystemVersion,
-                ignoredTokens: Self.ownPackageTokens),
-            available: true)
     }
 
     // MARK: - Acting on the list
@@ -660,12 +445,12 @@ final class AppUpdatesService: ObservableObject {
 
     /// Reads the normal Applications folders plus shallow app results from
     /// Spotlight in the user's home, all off the main thread.
-    private static func scanInstalledApps(includePublisherFeeds: Bool) -> [AppUpdatesSupport.InstalledApp] {
+    private static func scanInstalledApps() -> [AppUpdatesSupport.InstalledApp] {
         InstalledApps.applicationScanPaths(
             folderPaths: folderApplicationPaths(),
             spotlightPaths: spotlightApplicationPaths(),
             homeDirectory: NSHomeDirectory()
-        ).compactMap { scannedApp(at: URL(fileURLWithPath: $0), includePublisherFeeds: includePublisherFeeds) }
+        ).compactMap { scannedApp(at: URL(fileURLWithPath: $0)) }
     }
 
     private static func folderApplicationPaths() -> [String] {
@@ -698,7 +483,7 @@ final class AppUpdatesService: ObservableObject {
         return result.output.split(separator: "\n").map(String.init)
     }
 
-    private static func scannedApp(at url: URL, includePublisherFeeds: Bool) -> AppUpdatesSupport.InstalledApp? {
+    private static func scannedApp(at url: URL) -> AppUpdatesSupport.InstalledApp? {
         let infoURL = url.appendingPathComponent("Contents/Info.plist")
         guard let data = try? Data(contentsOf: infoURL),
               let plist = try? PropertyListSerialization.propertyList(from: data, format: nil)
@@ -719,22 +504,13 @@ final class AppUpdatesService: ObservableObject {
         let storeID = metadata.flatMap {
             MDItemCopyAttribute($0, "kMDItemAppStoreAdamID" as CFString) as? NSNumber
         }.map(\.stringValue)
-        var updateFeed: AppUpdateFeedSupport.Feed?
-        if includePublisherFeeds, !hasReceipt {
-            let configurationURL = url.appendingPathComponent("Contents/Resources/app-update.yml")
-            let configurationSize = (try? configurationURL.resourceValues(forKeys: [.fileSizeKey]))?.fileSize
-            let configuration = configurationSize.map { $0 <= 64 * 1_024 } == true
-                ? (try? String(contentsOf: configurationURL, encoding: .utf8)) : nil
-            updateFeed = AppUpdateFeedSupport.feed(info: plist, configuration: configuration)
-        }
         return AppUpdatesSupport.InstalledApp(name: name,
                                               bundleID: bundleID,
                                               path: url.standardizedFileURL.path,
                                               version: version,
                                               isFromAppStore: hasReceipt,
                                               buildVersion: plist["CFBundleVersion"] as? String ?? "",
-                                              storeID: storeID,
-                                              updateFeed: updateFeed)
+                                              storeID: storeID)
     }
 
     /// This app never lists itself: it has its own updater, and letting the

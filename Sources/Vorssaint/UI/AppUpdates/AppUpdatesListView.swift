@@ -10,10 +10,9 @@ struct AppUpdatesListView: View {
     @ObservedObject private var l10n = L10n.shared
     @ObservedObject private var updates = AppUpdatesService.shared
     @ObservedObject private var homebrew = HomebrewManager.shared
-    @AppStorage(DefaultsKey.appUpdatesIncludeOnlineCatalog)
-    private var includeOnlineCatalog = true
-    @AppStorage(DefaultsKey.appUpdatesIncludeAppStore)
-    private var includeAppStore = true
+    /// Sealed fork: online sources are removed; the preferences are ignored.
+    private let includeOnlineCatalog = false
+    private let includeAppStore = false
     @State private var showOperationDetails = false
     var compact = false
 
