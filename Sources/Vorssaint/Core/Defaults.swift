@@ -1050,8 +1050,8 @@ enum Defaults {
         // background check keeps a timer, so it starts off.
         DefaultsKey.appUpdatesCheckFrequency: AppUpdatesSupport.CheckFrequency.off.rawValue,
         DefaultsKey.appUpdatesIncludeHomebrewApps: true,
-        DefaultsKey.appUpdatesIncludeAppStore: true,
-        DefaultsKey.appUpdatesIncludeOnlineCatalog: true,
+        DefaultsKey.appUpdatesIncludeAppStore: false,     // sealed: online source removed
+        DefaultsKey.appUpdatesIncludeOnlineCatalog: false, // sealed: online source removed
         DefaultsKey.appUpdatesNotify: true,
         DefaultsKey.appUpdatesLastCheck: 0.0,
         DefaultsKey.appUpdatesLastCount: 0,
@@ -1298,7 +1298,7 @@ enum Defaults {
         DefaultsKey.recorderGIFSize: RecorderSupport.GIFSize.medium.rawValue,
         DefaultsKey.recorderGIFFrameRate: 12,
         DefaultsKey.recorderEditorPresets: Data(),
-        DefaultsKey.recorderSharingEnabled: true,
+        DefaultsKey.recorderSharingEnabled: false,   // sealed: sharing removed
         DefaultsKey.panelUtilityScreenRecorder: true,
         DefaultsKey.screenshotShowCaptureMenuOnShortcut: true,
         DefaultsKey.recorderShowCaptureMenuOnShortcut: true,
@@ -1345,7 +1345,7 @@ enum Defaults {
         DefaultsKey.screenshotOpenEditorDirectly: false,
         DefaultsKey.screenshotCopyToClipboard: false,
         DefaultsKey.screenshotPreviewPosition: ScreenshotSupport.QuickPreviewPosition.automatic.rawValue,
-        DefaultsKey.screenshotSharingEnabled: true,
+        DefaultsKey.screenshotSharingEnabled: false, // sealed: sharing removed
         DefaultsKey.panelUtilityScreenshot: true,
         DefaultsKey.windowLayoutShortcutsEnabled: false,
         DefaultsKey.windowDirectionalEnabled: false,

@@ -39,44 +39,7 @@ struct ScreenshotShareResponse: Decodable {
 }
 
 enum ScreenshotSharingSupport {
-    static let productionEndpoint = URL(string: "https://screenshots.vorssaint.com")!
-    static let developerBundleIdentifier = "com.vorssaint.utils.dev"
     static let maximumUploadBytes = 25 * 1_024 * 1_024
-
-    static func endpoint(bundleIdentifier: String?, developerOverride: String?) -> URL {
-        guard bundleIdentifier == developerBundleIdentifier,
-              let developerOverride,
-              let candidate = sanitizedEndpoint(developerOverride)
-        else { return productionEndpoint }
-        return candidate
-    }
-
-    static func sanitizedEndpoint(_ value: String) -> URL? {
-        let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard var components = URLComponents(string: trimmed),
-              components.scheme?.lowercased() == "https",
-              components.host != nil,
-              components.user == nil,
-              components.password == nil,
-              components.query == nil,
-              components.fragment == nil,
-              components.path.isEmpty || components.path == "/"
-        else { return nil }
-        components.scheme = "https"
-        components.path = ""
-        return components.url
-    }
-
-    static func uploadURL(endpoint: URL, duration: ScreenshotShareDuration) -> URL? {
-        let base = endpoint.appendingPathComponent("v1", isDirectory: true)
-            .appendingPathComponent("screenshots", isDirectory: false)
-        guard var components = URLComponents(url: base, resolvingAgainstBaseURL: false) else {
-            return nil
-        }
-        components.queryItems = [URLQueryItem(name: "expiresIn",
-                                               value: String(duration.rawValue))]
-        return components.url
-    }
 
     static func record(response: ScreenshotShareResponse,
                        endpoint: URL,

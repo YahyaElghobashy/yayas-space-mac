@@ -15,7 +15,8 @@ struct RecorderEditorView: View {
     /// The area being drawn for a blur, in the stage's own points, while the
     /// mouse is down.
     @State private var blurDraft: CGRect?
-    @AppStorage(DefaultsKey.recorderSharingEnabled) private var sharingEnabled = true
+    /// Sealed fork: link sharing is removed; the preference is ignored.
+    private let sharingEnabled = false
 
     private var strings: RecorderFeatureStrings {
         FeatureStrings.recorder(l10n.language)
