@@ -208,7 +208,6 @@ struct HomebrewPendingAction {
 
 enum HomebrewCommandBuilder {
     static let candidatePaths = ["/opt/homebrew/bin/brew", "/usr/local/bin/brew"]
-    static let installerCommand = #"/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)""#
     static var currentShellPath: String {
         if let shell = getpwuid(getuid())?.pointee.pw_shell {
             return String(cString: shell)
@@ -389,11 +388,6 @@ enum HomebrewCommandBuilder {
 
 enum HomebrewAnalytics {
     static let defaultDays = 30
-
-    static func url(kind: HomebrewPackageKind, days: Int = defaultDays) -> URL {
-        let category = kind == .formula ? "install-on-request/homebrew-core" : "cask-install/homebrew-cask"
-        return URL(string: "https://formulae.brew.sh/api/analytics/\(category)/\(days)d.json")!
-    }
 
     static func parse(_ data: Data,
                       kind: HomebrewPackageKind,

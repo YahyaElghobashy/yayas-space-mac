@@ -575,17 +575,6 @@ struct HomebrewSettings: View {
                 .foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)
                 .frame(maxWidth: 360)
-            Button {
-                homebrew.openHomebrewInstaller()
-            } label: {
-                Label(l10n.s.homebrewInstallHomebrew, systemImage: "terminal")
-            }
-            .buttonStyle(.borderedProminent)
-            Text(homebrew.didOpenInstaller ? l10n.s.homebrewInstallHomebrewOpened : l10n.s.homebrewInstallHomebrewCaption)
-                .font(.caption)
-                .foregroundStyle(.secondary)
-                .multilineTextAlignment(.center)
-                .frame(maxWidth: 360)
             if let error = homebrew.errorMessage, !error.isEmpty {
                 Label(error, systemImage: "exclamationmark.triangle.fill")
                     .font(.caption)

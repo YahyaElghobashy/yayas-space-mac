@@ -27,7 +27,6 @@ final class HomebrewManager: ObservableObject {
     @Published private(set) var untrustedTap: String?
     @Published private(set) var isTrustingTap = false
     private var untrustedTapRetry: (() -> Void)?
-    @Published private(set) var didOpenInstaller = false
     @Published private(set) var isShellConfigured = true
     @Published private(set) var shellConfigProfilePath: String?
     @Published private(set) var didOpenShellConfig = false
@@ -39,19 +38,12 @@ final class HomebrewManager: ObservableObject {
     private var outdatedGeneration = 0
     private var currentSearchKind: HomebrewPackageKind?
     private var popularityCache: [HomebrewPackageKind: PopularityCacheEntry] = [:]
-    private var popularityLoads: Set<HomebrewPackageKind> = []
     private var activeProcess: Process?
     private var cancelRequested = false
     private var installedCaskRecords: [HomebrewCaskRecord] = []
     private var installedCaskRecordsFetchedAt: Date?
     private var ownershipLoads: [String: [(HomebrewPackage?) -> Void]] = [:]
     private var completedOperationCleanup: DispatchWorkItem?
-    private lazy var analyticsSession: URLSession = {
-        let configuration = URLSessionConfiguration.ephemeral
-        configuration.timeoutIntervalForRequest = 6
-        configuration.timeoutIntervalForResource = 8
-        return URLSession(configuration: configuration)
-    }()
 
     var isBusy: Bool {
         isLoadingInstalled || isSearching || isLoadingDetails || operation != nil
@@ -110,7 +102,6 @@ final class HomebrewManager: ObservableObject {
                     self.installed = try HomebrewParser.parseInfoCommandOutput(output).map(self.packageEnriched)
                     self.installedCaskRecords = HomebrewParser.parseInstalledCaskRecords(output)
                     self.installedCaskRecordsFetchedAt = Date()
-                    self.didOpenInstaller = false
                     if let selected = self.selectedPackage {
                         self.selectedPackage = self.packageEnriched(self.installed.first { $0.id == selected.id } ?? selected)
                     }
@@ -298,13 +289,6 @@ final class HomebrewManager: ObservableObject {
     func openTerminalFallback() {
         guard let command = terminalFallbackCommand else { return }
         openTerminal(command: command)
-    }
-
-    func openHomebrewInstaller() {
-        errorMessage = nil
-        if openTerminal(command: HomebrewCommandBuilder.installerCommand) {
-            didOpenInstaller = true
-        }
     }
 
     func openShellConfiguration() {
@@ -509,26 +493,10 @@ final class HomebrewManager: ObservableObject {
                                           finishedAt: status.finishedAt)
     }
 
+    /// Sealed fork: install-count popularity came from formulae.brew.sh and is
+    /// no longer fetched. Search results simply keep the order brew returned.
     private func loadPopularityIfNeeded(kind: HomebrewPackageKind) {
-        if popularityCache[kind]?.isFresh == true {
-            applyPopularityToCurrentSearch(kind: kind)
-            return
-        }
-        guard !popularityLoads.contains(kind) else { return }
-        popularityLoads.insert(kind)
-        isLoadingPopularity = true
-        let url = HomebrewAnalytics.url(kind: kind)
-        analyticsSession.dataTask(with: url) { [weak self] data, _, _ in
-            DispatchQueue.main.async {
-                guard let self else { return }
-                self.popularityLoads.remove(kind)
-                self.isLoadingPopularity = !self.popularityLoads.isEmpty
-                guard let data,
-                      let values = try? HomebrewAnalytics.parse(data, kind: kind) else { return }
-                self.popularityCache[kind] = PopularityCacheEntry(values: values, fetchedAt: Date())
-                self.applyPopularityToCurrentSearch(kind: kind)
-            }
-        }.resume()
+        applyPopularityToCurrentSearch(kind: kind)
     }
 
     private func applyPopularityToCurrentSearch(kind: HomebrewPackageKind) {
