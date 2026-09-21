@@ -716,19 +716,6 @@ enum CommandBarCatalog {
                     CommandBarService.shared.query = ""
                 }))
         }
-        let feedback = FeatureStrings.feedback(language)
-        entries.append(CommandBarEntry(
-            id: "action.feedback.bug",
-            title: feedback.commandBug,
-            subtitle: feedback.commandSubtitle,
-            icon: .symbol("ladybug"),
-            run: { _ in afterBeat { appDelegate()?.openFeedbackWindow(kind: .bug) } }))
-        entries.append(CommandBarEntry(
-            id: "action.feedback.feature",
-            title: feedback.commandFeature,
-            subtitle: feedback.commandSubtitle,
-            icon: .symbol("lightbulb"),
-            run: { _ in afterBeat { appDelegate()?.openFeedbackWindow(kind: .feature) } }))
         entries.append(CommandBarEntry(
             id: "action.restartApp",
             title: String(format: bar.restartAppFormat, AppInfo.name),
