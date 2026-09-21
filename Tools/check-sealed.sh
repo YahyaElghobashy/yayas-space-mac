@@ -6,7 +6,7 @@
 # HTTPS GET through the wrapper in Sources/YayasSpace/Sealed/NetworkPolicy.swift
 # (SealedURLSession), which refuses any host outside NetworkPolicy.allowedHosts:
 #
-#   api.github.com                 update check        (Services/Update/UpdateService.swift)
+#   api.github.com                 update check + upstream inspiration (Services/Update/UpdateService.swift)
 #   itunes.apple.com               App Store lookup    (Services/AppUpdates/AppUpdatesService.swift)
 #   uclient-api.itunes.apple.com   App Store lookup    (Services/AppUpdates/AppUpdatesService.swift)
 #   formulae.brew.sh               cask catalog        (Services/AppUpdates/AppUpdatesService.swift)
@@ -86,11 +86,12 @@ if [[ -n "$tool_hits" ]]; then
     sealed_rc=1
 fi
 
-# Every remote host literal in Sources/ must be one of the allowed API hosts,
-# github.com (release page / About links) or one of the About/social links
-# that only open in the browser on a click.
+# Every remote host literal in Sources/ must be one of the allowed API hosts
+# or github.com (release pages, the repository and the upstream project,
+# which only open in the browser on a click). Yaya's Space carries no
+# donation, chat or social links.
 host_hits="$(grep -rhoE 'https?://[A-Za-z0-9.-]+' Sources --include='*.swift' | sort -u \
-    | grep -vE '^https://(api\.github\.com|itunes\.apple\.com|uclient-api\.itunes\.apple\.com|formulae\.brew\.sh|github\.com|yayasspace\.com|buymeacoffee\.com|discord\.gg|x\.com|example\.invalid)$' || true)"
+    | grep -vE '^https://(api\.github\.com|itunes\.apple\.com|uclient-api\.itunes\.apple\.com|formulae\.brew\.sh|github\.com|example\.invalid)$' || true)"
 if [[ -n "$host_hits" ]]; then
     echo "✗ unexpected remote host literal under Sources/:" >&2
     print -r -- "$host_hits" >&2
@@ -100,11 +101,25 @@ fi
 # Paths that were removed on purpose and must not come back with a rebase:
 # Homebrew analytics (popularity), publisher (Sparkle) feeds, the upload and
 # feedback endpoints, the in-app speed test.
-removed_hits="$(grep -rnE 'formulae\.brew\.sh/api/analytics|SUFeedURL|latest-mac\.yml|screenshots\.yayasspace\.com|speed\.cloudflare\.com|AppUpdateFeedLoader|AppUpdateFeedSupport' Sources \
+removed_hits="$(grep -rnE 'formulae\.brew\.sh/api/analytics|SUFeedURL|latest-mac\.yml|screenshots\.vorssaint\.com|speed\.cloudflare\.com|buymeacoffee\.com|discord\.gg|x\.com/|AppUpdateFeedLoader|AppUpdateFeedSupport' Sources \
     --include='*.swift' | grep -vE '^\s*[^:]+:[0-9]+:\s*//' || true)"
 if [[ -n "$removed_hits" ]]; then
     echo "✗ a removed network path is referenced again:" >&2
     print -r -- "$removed_hits" >&2
+    sealed_rc=1
+fi
+
+# The update check must target this fork's repository and read the upstream
+# project only as inspiration (no other repository, no download URL).
+UPDATE_SERVICE="Sources/YayasSpace/Services/Update/UpdateService.swift"
+for repo in "YahyaElghobashy/yayas-space-mac" "vorssaint/vorssaint-utils"; do
+    if ! grep -qF "\"$repo\"" "$UPDATE_SERVICE"; then
+        echo "✗ $repo missing from UpdateService" >&2
+        sealed_rc=1
+    fi
+done
+if grep -qE 'releases/download|downloadTask\(|NSWorkspace\.shared\.open\(.*dmg' "$UPDATE_SERVICE"; then
+    echo "✗ UpdateService references a download path" >&2
     sealed_rc=1
 fi
 
