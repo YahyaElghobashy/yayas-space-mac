@@ -4,6 +4,19 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project uses
 [Semantic Versioning](https://semver.org/).
 
+## [1.0.0] - 2026-09-22
+
+Yaya's Space: the sealed fork of Vorssaint 3.3.5, rebranded. Everything below this entry is the upstream Vorssaint history, kept as is.
+
+### Sealed
+- Every outbound request is a read-only HTTPS GET through one wrapper (`SealedURLSession`) to `api.github.com`, `itunes.apple.com`, `uclient-api.itunes.apple.com` or `formulae.brew.sh`, plus the radial menu's one-click favicon fetch. `Tools/check-sealed.sh` guards it.
+- Removed at the source: screenshot and recording link uploads (the macOS share sheet takes their place), the Feedback entry points, the Cloudflare speed test (the row runs Apple's `networkQuality` or opens Speedtest.app), Homebrew analytics and the `curl | bash` installer, publisher update feeds, and the DMG download / auto-install path.
+
+### Rebranded
+- Name "Yaya's Space", executable `YayasSpace`, bundle id `com.yahyaelghobashy.yayasspace` (Developer variant `.dev`, helper `.fan-control`, adapter `.now-playing`), new icon drawn from code, new signing identity, all twelve localisations updated.
+- Update check points at `YahyaElghobashy/yayas-space-mac` and versioning restarts at 1.0.0. A separate read-only check surfaces each new upstream Vorssaint release once as an "upstream inspiration" notice with a link to its page.
+- About carries a one-line "Based on Vorssaint" attribution; the upstream donation, Discord and X links, icon, logo, showcase media and release workflow are gone.
+
 ## [3.3.5] - 2026-09-06
 
 ### Summary

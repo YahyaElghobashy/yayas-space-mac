@@ -6,9 +6,7 @@ The permission and uninstall commands below all point at Yaya's Space's bundle i
 
 ## The app will not open
 
-Official Yaya's Space builds are signed with an Apple Developer ID and notarized, so they open with no security warning.
-
-If you built the app yourself or grabbed an unofficial copy, macOS Gatekeeper may stop it on the first launch. To open it anyway, do one of these.
+Yaya's Space is built from source and signed ad hoc (or with a local self-signed identity), so macOS Gatekeeper may stop it on the first launch. To open it anyway, do one of these.
 
 1. Right click, or Control click, Yaya's Space in Applications, choose Open, and confirm.
 2. Or open System Settings, Privacy and Security, find the note about Yaya's Space being blocked, and click Open Anyway.

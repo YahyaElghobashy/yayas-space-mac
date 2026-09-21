@@ -11,10 +11,10 @@ under GPL-3.0-or-later.
 
 ```sh
 git clone https://github.com/YahyaElghobashy/yayas-space-mac.git
-cd yayasspace-utils
-./build.sh                         # build and assemble the bundle
-./build/YayasSpace --selftest       # quick health check (SELFTEST OK)
-./build.sh --install               # install into /Applications and launch
+cd yayas-space-mac
+./build.sh --dev                   # → dist/Yaya's Space (Developer).app, signed ad hoc
+./build/YayasSpaceDeveloper --selftest   # quick health check (SELFTEST OK)
+./Tools/check-sealed.sh            # the network guard must stay green
 ```
 
 You need macOS 14 or newer, Apple Silicon and the Xcode Command Line Tools. The
@@ -32,7 +32,7 @@ macOS ties Accessibility and Screen Recording grants to the hash, so each
 rebuild silently orphans them: System Settings keeps showing the app as
 granted, the app is no longer trusted, and no new prompt appears. Builds that
 install (`--dev` or `--install`) therefore create a free, self signed identity
-called `Yaya's Space Utils Signing` in a dedicated keychain automatically when no
+called `Yaya's Space Signing` in a dedicated keychain automatically when no
 identity is installed. For a build you do not install, run the same setup once
 yourself:
 
@@ -47,14 +47,9 @@ once (`tccutil reset Accessibility com.yahyaelghobashy.yayasspace.dev`) and gran
 again. The identity is a local convenience only and never shows up outside
 the keychain.
 
-Official releases work differently. CI signs the app and DMG with an Apple
-**Developer ID**, using credentials isolated in the protected `release-signing`
-environment, then
-**notarizes** and staples them through `Tools/notarize.sh`, with secrets
-`NOTARY_API_KEY_P8`, `NOTARY_KEY_ID` and `NOTARY_ISSUER_ID`, so downloads open
-with no Gatekeeper warning. `build.sh` prefers the Developer ID identity when it
-is present, with the hardened runtime and `Resources/YayasSpace.entitlements`,
-and falls back to the self signed identity, then to ad hoc.
+There is no notarized release channel: Yaya's Space is built from source by
+the person using it. `build.sh` still prefers a Developer ID identity if one is
+installed, then the self-signed one, then ad hoc.
 
 ## Project layout
 
@@ -197,12 +192,8 @@ For general help and every support channel, see [support](SUPPORT.md).
     says on its own that it is not asking to be merged yet, and it says so
     everywhere the pull request appears.
 
-## Releases (maintainers)
+## Releases
 
-```sh
-git tag v2.1.0 && git push origin v2.1.0
-```
-
-Only an owner-created protected version tag can enter the `release-signing`
-environment. After owner approval, the workflow builds, signs, notarizes and
-publishes the DMG as an immutable GitHub release.
+Tag the commit (`git tag v1.1.0`), push the tag and publish a GitHub release
+with notes. Releases are source-only; the app's update check reads them from
+`api.github.com` and shows a notice. There is no DMG and no signing secret.

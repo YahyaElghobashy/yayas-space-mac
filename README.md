@@ -1,69 +1,79 @@
 <p align="center">
   <picture>
     <source media="(prefers-color-scheme: dark)" srcset="docs/assets/readme/logo-dark.svg">
-    <img src="docs/assets/readme/logo.svg" width="220" alt="Yaya's Space logo">
+    <img src="docs/assets/readme/logo.svg" width="320" alt="Yaya's Space">
   </picture>
 </p>
 
-<h1 align="center">Yaya's Space</h1>
-
 <p align="center">
-  One menu bar icon doing the job of a dozen paid Mac apps.<br>
-  Free, open source, and everything runs on your Mac.
+  A sealed, local-first macOS menu-bar toolkit.<br>
+  A personal fork of <a href="https://github.com/vorssaint/vorssaint-utils">Vorssaint</a> by Pedro Gomes, GPL-3.0-or-later.
 </p>
 
 <p align="center">
-  <a href="https://github.com/YahyaElghobashy">Website</a> ·
   <a href="#install">Install</a> ·
   <a href="#everything-it-does">Features</a> ·
-  <a href="#private-by-default">Privacy</a> ·
-  <a href="CHANGELOG.md">Changelog</a> ·
-  <a href="mailto:hello@github.com/YahyaElghobashy">Contact</a> ·
-  <a href="https://buymeacoffee.com/yayasspace">Buy Me a Coffee</a>
+  <a href="#network-policy">Network policy</a> ·
+  <a href="#what-changed-from-upstream">What changed</a> ·
+  <a href="#build-it-yourself">Build</a> ·
+  <a href="CHANGELOG.md">Changelog</a>
 </p>
 
 <p align="center">
-  <a href="https://github.com/YahyaElghobashy/yayas-space-mac/releases"><img src="https://img.shields.io/github/v/release/YahyaElghobashy/yayas-space-mac?label=release&color=4c8dff" alt="Latest release"></a>
-  <a href="https://github.com/YahyaElghobashy/yayas-space-mac/releases"><img src="https://img.shields.io/github/downloads/YahyaElghobashy/yayas-space-mac/total?color=4c8dff" alt="Downloads"></a>
-  <a href="https://github.com/YahyaElghobashy/yayas-space-mac/actions/workflows/ci.yml"><img src="https://github.com/YahyaElghobashy/yayas-space-mac/actions/workflows/ci.yml/badge.svg?branch=main&event=push" alt="CI status"></a>
-  <a href="#what-you-need"><img src="https://img.shields.io/badge/macOS-14%2B%20Apple%20Silicon-black" alt="macOS 14 and newer, Apple Silicon"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-GPL--3.0--or--later-blue" alt="License GPL 3.0 or later"></a>
+  <img src="https://img.shields.io/badge/macOS-14%2B%20Apple%20Silicon-black" alt="macOS 14 and newer, Apple Silicon">
+  <img src="https://img.shields.io/badge/network-4%20read--only%20hosts-46216B" alt="Four read-only hosts">
 </p>
 
-<p align="center">
-  <a href="https://discord.gg/M6BwWH4BJp">
-    <img src="docs/assets/readme/discord-symbol.svg" width="72" alt="Discord">
-  </a>
-</p>
+## What Yaya's Space is
 
-<p align="center">
-  For anything private, email
-  <a href="mailto:hello@github.com/YahyaElghobashy"><strong>hello@github.com/YahyaElghobashy</strong></a>.
-</p>
+Yaya's Space is Yahya Elghobashy's build of the Vorssaint menu-bar utility: one icon holding a volume mixer, a system monitor, window and Dock controls, keyboard and mouse tweaks, clipboard tools, screen capture, keep-awake and more. It is the upstream 3.3.5 code base, sealed so that every outbound request is a read-only HTTPS GET to a short list of hosts, then rebranded under its own name, icon, bundle id and update feed as the upstream [trademark policy](https://github.com/vorssaint/vorssaint-utils/blob/main/TRADEMARKS.md) asks of forks.
 
-<p align="center">
-  <a href="https://trendshift.io/repositories/53716?utm_source=repository-badge&amp;utm_medium=badge&amp;utm_campaign=badge-repository-53716" target="_blank" rel="noopener noreferrer"><img src="https://trendshift.io/api/badge/repositories/53716" alt="YahyaElghobashy/yayas-space-mac | Trendshift" width="250" height="55"></a>
-  <a href="https://trendshift.io/repositories/53716?utm_source=trendshift-badge&amp;utm_medium=badge&amp;utm_campaign=badge-trendshift-53716" target="_blank" rel="noopener noreferrer"><img src="https://trendshift.io/api/badge/trendshift/repositories/53716/weekly?language=Swift" alt="YahyaElghobashy/yayas-space-mac | Trendshift weekly ranking" width="250" height="55"></a>
-</p>
+It is built and used by one person, on one Mac, from source. There is no App Store listing, no Homebrew cask, no notarized download and no auto-install.
 
-<p align="center">
-  <img src="docs/assets/readme/panel-mixer.png" width="196" alt="Volume mixer with per app sliders, one app boosted past 100 percent">
-  <img src="docs/assets/readme/panel-system.png" width="196" alt="System tab with temperatures, usage graphs and memory pressure">
-  <img src="docs/assets/readme/panel-controls.png" width="196" alt="Window controls with the app switcher and Dock features">
-  <img src="docs/assets/readme/panel-utilities.png" width="196" alt="Utilities with cleaner, Homebrew, media tools and clipboard">
-</p>
+Not affiliated with or endorsed by Vorssaint.
 
-Per app volume, a real system monitor, a better app switcher, window snapping, Dock previews, clipboard history, text snippets, a file shelf, an uninstaller. The utilities Mac users usually buy one by one, together behind a single menu bar icon, with no account, no telemetry and no subscription.
+## Network policy
+
+Every request the app can make passes through one wrapper, `SealedURLSession` (`Sources/YayasSpace/Sealed/NetworkPolicy.swift`), which refuses anything that is not a body-less HTTPS GET to one of these hosts:
+
+| Host | Used for |
+| --- | --- |
+| `api.github.com` | Update check for this repository's releases, and the read-only "upstream inspiration" check of Vorssaint's latest release. A notice is shown; nothing is downloaded. |
+| `itunes.apple.com` | App Updates: App Store lookup by bundle id. |
+| `uclient-api.itunes.apple.com` | App Updates: App Store lookup by store id. |
+| `formulae.brew.sh` | App Updates: the public Homebrew cask catalog (`/api/cask.json` only). |
+
+One deliberate per-click exception: the radial menu's "Fetch Website Icon" button asks for `/favicon.ico` on exactly the host you typed, for that click only (GET, 5 s, 2 MB cap, same-origin redirects).
+
+Beyond that: no telemetry, no crash reports, no analytics, no uploads, no feedback endpoint, no publisher (Sparkle) feeds, no speed-test endpoint. Both update checks share one "Check for updates automatically" toggle; switch it off and the app makes no request at all. `Tools/check-sealed.sh` scans the sources for any other networking API, network-capable shell tool or remote host literal and fails the build if one appears.
+
+Links that open in your browser on a click (the repository, the upstream project, a release page) go to `github.com` only.
+
+## What changed from upstream
+
+Removed at the source, not hidden:
+
+- Screenshot and recording link uploads (the "Create link" actions). Wherever they lived, a "Share…" button now opens the macOS share sheet on the local PNG / MP4 instead; macOS does the sending.
+- The Feedback entry points (Settings, panel, command bar).
+- The in-app Cloudflare speed test. The row runs Apple's `/usr/bin/networkQuality` or opens Speedtest.app.
+- Homebrew analytics (popularity badges) and the `curl | bash` installer button.
+- Publisher update feeds and the DMG download / install path. Updates are a notice with an "Open release page" button; you rebuild from source to adopt one.
+- Showcase media, the Discord / X / donation links, the upstream signing identities and release workflow.
+
+Added:
+
+- `SealedURLSession` and `NetworkPolicy` as the single network choke point, plus `Tools/check-sealed.sh` as the guard.
+- The "upstream inspiration" notice: when Vorssaint publishes a new release, the panel and Settings show "Vorssaint upstream shipped vX.Y — see what changed" once per release, with an "Open release page" button.
+- A build.sh `--dev` path that signs ad hoc, never touches the keychain and keeps a finished copy in `dist/`.
+
+Everything else, including all twelve localisations, is the upstream feature set.
 
 ## Install only what you use
 
 Nobody needs all of it, and Yaya's Space is built around that. The Features page installs and uninstalls whole features: what you uninstall disappears from the entire app and stops loading, so it spends no CPU, memory or energy. Nothing is deleted, and installing again brings your old settings back.
 
 First setup offers three one click bundles, Essentials, Windows, and Battery and quiet, plus a visual picker for choosing individual features. Only the permissions those choices need are requested next, and everything can be changed later in Settings. Every feature also wears an honest energy badge saying what it keeps alive while on.
-
-<p align="center">
-  <img src="docs/assets/readme/features-hub.png" width="720" alt="The Features hub in Settings, installing and uninstalling whole features">
-</p>
 
 The rest bends the same way: panel sections reorder and hide, the compact layout trades sections for tabs, settings export to a file and import on a new Mac, the app can stay light or dark apart from the Mac, and the whole app speaks more than a dozen languages.
 
@@ -81,7 +91,7 @@ The rest bends the same way: panel sections reorder and hide, the compact layout
 
 - **System monitor.** CPU, GPU, memory, swap use and temperatures with history graphs, including a choice between total memory in use and memory held by apps, plus battery charge, temperature, health, time remaining, cycle count and power draw together in Power, an optional Fan Control beta with continuous manual speeds, custom temperature curves and live RPM, the apps burning energy right now and a shortcut to the Mac's full process inspector.
 - **Menu bar readouts.** Keep the readings you care about in the bar itself, with values or compact usage bars, including optional battery time remaining and fan speed, combined or as separate items.
-- **Network.** Live rates, session totals and a built in speed test.
+- **Network.** Live rates and session totals. The speed test row runs Apple's own `networkQuality` tool or opens Speedtest.app; nothing in the app measures your line itself.
 - **Alerts.** Optional notifications for sustained CPU load, high CPU or battery temperature, memory pressure, low disk space and low battery.
 
 ### Windows and the Dock
@@ -93,10 +103,6 @@ The rest bends the same way: panel sections reorder and hide, the compact layout
 - **Maximize windows.** The green button fills the screen without creating another Space, and puts the window back on the next click.
 - **Quit on close.** Apps you choose quit when their last window closes.
 - **Quit and close protection.** Protect ⌘Q and ⌘W with a hold, double press or extra modifier, independently and only for the apps you choose.
-
-<p align="center">
-  <img src="docs/assets/readme/window-switcher.gif" width="540" alt="The window switcher showing live thumbnails of open windows">
-</p>
 
 ### Keyboard and mouse
 
@@ -140,7 +146,7 @@ The rest bends the same way: panel sections reorder and hide, the compact layout
 - **Scratchpad.** Floating pads in named tabs for short-lived text: meeting notes, numbers, fragments on their way somewhere else. They save as you type, preview Markdown formatting on demand, step aside when you click elsewhere (or stay floating, your call), and can copy everything, export to a file or clear themselves after a quiet period.
 - **Copy text from screen.** Select any area and its text is recognized offline, straight onto the clipboard, optionally joining line breaks into one paragraph. When the area holds a QR code, its content is shown so you can copy it or open the link.
 - **Color picker.** Grab any pixel from the shared screen selector as HEX, RGB, HSL or SwiftUI code, with the system loupe kept as a permission-free fallback.
-- **App updates.** One list of the apps on your Mac that have a newer version. It checks package-managed and store apps, reads supported update feeds published by app developers, and matches other apps by identity or exact name in a public catalog. Managed updates install together; other rows open the original app so its own updater stays in control. Each source can be switched off, and optional background checks tell you when something is waiting.
+- **App updates.** One list of the apps on your Mac that have a newer version. In this build it checks package-managed apps, the App Store and the public Homebrew cask catalog; publisher update feeds are not queried. Managed updates install together; other rows open the original app so its own updater stays in control. Each source can be switched off, and optional background checks tell you when something is waiting.
 - **Cleaner.** Sweeps app leftovers, caches and logs, by hand or on a schedule.
 - **Messaging downloads.** The Cleaner can also tidy the media a messaging app saves into Downloads, confirmed by macOS metadata and only ever moved to the Trash, with a review list, retention rules and an optional organizer that files new ones into a folder of your choice.
 - **Uninstaller.** Drop an app in and take its caches, preferences, helpers, plugins, containers and other leftovers to the Trash with it. Related finds start unchecked so you can review them first.
@@ -157,95 +163,50 @@ The rest bends the same way: panel sections reorder and hide, the compact layout
 
 ## Install
 
-With [Homebrew](https://brew.sh):
+There is no installer. Build it (below), then move `dist/Yaya's Space (Developer).app` wherever you like and open it. On first launch macOS will ask you to confirm an unsigned app: right click, Open, confirm.
 
-```sh
-brew install --cask yayasspace
-```
-
-Or grab the disk image from the [releases page](https://github.com/YahyaElghobashy/yayas-space-mac/releases) and drag Yaya's Space into Applications.
-
-Builds are signed with an Apple Developer ID and notarized, so macOS opens them without a fuss and your permissions survive updates.
-
-## Uninstall
-
-With Homebrew:
-
-```sh
-brew uninstall --cask yayasspace
-```
-
-To remove Yaya's Space completely, including its settings and permissions:
-
-```sh
-./Tools/uninstall.sh
-```
-
-## Private by default
-
-Yaya's Space is local-first, with no account, analytics or tracking. The network is touched only by things you can see: update checks, the speed test, Homebrew actions, temporary screenshot or recording links and feedback you explicitly send. The full story is in the [privacy notes](docs/PRIVACY.md).
-
-Permissions get the same treatment. Every one is optional, the app explains each in plain words, shows which features actually use it, and even tells you when a permission you granted is no longer needed by anything, with a shortcut to revoke it.
-
-<p align="center">
-  <img src="docs/assets/readme/permissions.png" width="720" alt="The Permissions page showing what each permission does, which features use it, and an unused permission warning">
-</p>
-
-| Permission | Used by | Without it |
-|---|---|---|
-| Accessibility | Switcher, Dock features, window controls, mouse and keyboard features, snippets, cut and paste | Those features stay off |
-| Screen Recording | Window previews, screenshots, copy text and screen recordings | Those captures stay unavailable |
-| System Audio Recording | Per app volume and output routing | Apps stay on normal system audio |
-| Microphone | Optional voice track in screen recordings | Recordings continue without your voice |
-| Notifications | Keep awake, battery, monitor and update alerts | The app stays silent |
-| Full Disk Access, optional | Deeper cleaner and uninstaller scans | Only reachable places are scanned |
-| Administrator, once, optional | Password free closed lid toggling | A password prompt per toggle |
-
-The shelf and almost every quick toggle need no permission at all. Finder cut and paste, the uninstaller, emptying the Trash and the Homebrew terminal handoff ask macOS for Automation access the first time they talk to Finder or Terminal.
+To remove it completely, including its settings, login item, fan helper and permissions, run `Tools/uninstall.sh`.
 
 ## What you need
 
-- A Mac with Apple Silicon
-- macOS 14 Sonoma or newer
+- macOS 14 or newer on Apple Silicon.
+- The Xcode Command Line Tools with Swift 6.4 (`xcode-select --install`). No Xcode.app is needed; the build is a plain `swiftc` invocation.
 
-### Build it yourself
+## Build it yourself
 
 ```sh
 git clone https://github.com/YahyaElghobashy/yayas-space-mac.git
-cd yayasspace-utils
-./build.sh            # compile, generate the icon, assemble the signed bundle
-./build.sh --install  # the same, then install into Applications and launch
+cd yayas-space-mac
+./build.sh --dev          # → dist/Yaya's Space (Developer).app, signed ad hoc
+./Tools/check-sealed.sh   # confirms every request still goes through SealedURLSession
 ```
 
-Xcode Command Line Tools are the only requirement. The [contributing guide](CONTRIBUTING.md) covers the layout and conventions. Official builds come only from the maintainer: the GPL covers the source, while the Yaya's Space name, icon and look are covered by [TRADEMARKS.md](TRADEMARKS.md), so forks need their own identity.
+`--dev` builds the Developer variant (`com.yahyaelghobashy.yayasspace.dev`, version `1.0.0-dev`), which never auto-updates and coexists with any other build. `./build.sh` without flags builds the release variant (`com.yahyaelghobashy.yayasspace`); `--install` puts it in /Applications and, if no identity exists, creates a free self-signed one through `Tools/setup-signing.sh` so granted permissions survive rebuilds. `--test` runs the unit tests.
 
-## When something misbehaves
+Without `actool` (full Xcode 26+) the adaptive icon catalog is skipped and the Dock uses `AppIcon.icns`, which is what `--dev` produces.
 
-The [troubleshooting guide](docs/TROUBLESHOOTING.md) walks through the common cases: the app blocked on first launch, a permission that will not stick, thumbnails showing as icons. To remove Yaya's Space completely, `./Tools/uninstall.sh` quits the app, drops the login item, resets its privacy grants and deletes every trace.
+## Icon and brand
+
+The icon is a placeholder drawn from code: a rounded square on paper `#F8F5F0` with a heavy system-font "Y" in plum `#46216B`.
+
+- `Tools/MakeIcon.swift` renders the `.iconset`, `AppIcon.icns`, the 26×20 pt menu bar template glyph and `BrandMark.png` at build time. Change the two colours or the glyph there, or replace `renderAppIcon(px:)` with a draw of your own 1024×1024 master.
+- `Resources/Brand/AppIcon.icon` is the Icon Composer catalog with the matching vector mark (`Assets/yayas-space-brandmark.svg`), used only when `actool` is available.
+- `docs/assets/readme/logo.svg` and `logo-dark.svg` are the README wordmarks; `icon.png` is the 256 px render.
+
+The upstream icon and logo were reserved brand material and are not in this repository.
 
 ## Documentation
 
 - [Privacy](docs/PRIVACY.md), what does and does not leave your Mac
-- [Permissions](docs/PERMISSIONS.md), every macOS permission in plain words
+- [Permissions](docs/PERMISSIONS.md), every macOS permission explained
 - [Troubleshooting](docs/TROUBLESHOOTING.md), the common fixes
-- [Contributing](CONTRIBUTING.md), build, layout and conventions
-- [Support](SUPPORT.md), where to get help
-- [Security](SECURITY.md), how to report a vulnerability
-
-## Community
-
-Yaya's Space went from first commit to the front of GitHub trending in three days, top of the Swift charts, and issues and pull requests have shaped every release since. Bug reports, feature ideas and translations are all welcome, starting from the [contributing guide](CONTRIBUTING.md).
-
-Yaya's Space is free and will stay that way. If it earned its place in your menu bar, a star helps other people find it, and a [coffee](https://buymeacoffee.com/yayasspace) keeps the maintainer awake, with or without the Keep awake feature.
+- [Contributing](CONTRIBUTING.md), building and contributing
+- [Security](SECURITY.md) and [Support](SUPPORT.md)
 
 ## Acknowledgements
 
-- App icon designed by [@divisionseven](https://github.com/divisionseven)
+- Vorssaint, by Pedro Gomes, is the project this fork is based on: <https://github.com/vorssaint/vorssaint-utils>. Its releases are the "upstream inspiration" this build watches, and its ideas are brought over by hand.
 
 ## License
 
-[GPL 3.0 or later](LICENSE), copyright 2026 Yaya's Space. The license covers the source code; the Yaya's Space name, logo and look are covered separately in [TRADEMARKS.md](TRADEMARKS.md).
-
-<p align="center">
-  <sub>Made by <a href="https://x.com/yayasspace">@YahyaElghobashy</a></sub>
-</p>
+[GPL 3.0 or later](LICENSE). Copyright 2026 Vorssaint for the upstream code, copyright 2026 Yahya Elghobashy for the changes in this repository; the original copyright notices are kept in every file. The "Yaya's Space" name and icon are Yahya's; see [TRADEMARKS.md](TRADEMARKS.md).
