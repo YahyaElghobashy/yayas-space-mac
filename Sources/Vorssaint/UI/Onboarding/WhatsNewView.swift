@@ -11,6 +11,9 @@ import SwiftUI
 struct UpdatePreviewView: View {
     let version: String
     let notes: String?
+    /// The release's own title and page, from the same GitHub Releases GET.
+    var releaseTitle: String? = nil
+    var releaseURL: URL? = nil
     var onCancel: () -> Void
 
     @ObservedObject private var l10n = L10n.shared
@@ -24,9 +27,16 @@ struct UpdatePreviewView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            HStack {
-                Text(l10n.s.tabReleaseNotes)
-                    .font(.system(size: 22, weight: .bold))
+            HStack(alignment: .firstTextBaseline) {
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(l10n.s.tabReleaseNotes)
+                        .font(.system(size: 22, weight: .bold))
+                    if let releaseTitle, !releaseTitle.isEmpty {
+                        Text(releaseTitle)
+                            .font(.system(size: 13.5, weight: .medium))
+                            .foregroundStyle(.secondary)
+                    }
+                }
                 Spacer()
             }
             .padding(.horizontal, 28)
@@ -51,6 +61,11 @@ struct UpdatePreviewView: View {
                     .font(.callout)
                     .foregroundStyle(.secondary)
                 Spacer()
+                if releaseURL != nil {
+                    Button(SealedBuild.openReleasePageTitle) {
+                        UpdateService.shared.openReleasePage()
+                    }
+                }
                 Button(l10n.s.uninstallerCancel) { onCancel() }
                     .keyboardShortcut(.cancelAction)
             }

@@ -1713,6 +1713,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSW
         let host = NSHostingController(rootView: UpdatePreviewView(
             version: version,
             notes: UpdateService.shared.availableNotes,
+            releaseTitle: UpdateService.shared.availableRelease?.title,
+            releaseURL: UpdateService.shared.availableRelease?.pageURL,
             onCancel: { [weak self] in
                 self?.updatePreviewWindow?.close()
             }

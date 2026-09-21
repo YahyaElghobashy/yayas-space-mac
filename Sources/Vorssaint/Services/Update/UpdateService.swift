@@ -23,6 +23,21 @@ final class UpdateService: ObservableObject {
     /// Markdown release notes for the available update, shown in the pre-install
     /// preview. Set alongside `.available`; cleared otherwise.
     @Published private(set) var availableNotes: String?
+    /// Sealed fork: what the GitHub Releases GET already returns about the
+    /// available release (title, body, page), for the rich notice. Set
+    /// alongside `.available`; cleared otherwise. Nothing is downloaded.
+    @Published private(set) var availableRelease: ReleaseInfo?
+
+    struct ReleaseInfo: Equatable {
+        let version: String
+        let title: String?
+        let body: String?
+        let pageURL: URL?
+
+        /// The first few changelog lines with markdown headers, bullets and
+        /// emphasis lightly stripped; "…" closes it when more follow.
+        var excerpt: String? { UpdateService.changelogExcerpt(from: body) }
+    }
 
     private let repository = "vorssaint/vorssaint-utils"
     private var refreshTimer: Timer?
@@ -105,6 +120,7 @@ final class UpdateService: ObservableObject {
                 self.lastChecked = Date()
                 guard let data, error == nil else {
                     self.availableNotes = nil
+                    self.availableRelease = nil
                     self.state = .failed(error?.localizedDescription ?? "-")
                     return
                 }
@@ -120,6 +136,7 @@ final class UpdateService: ObservableObject {
 
                 guard !releases.isEmpty else {
                     self.availableNotes = nil
+                    self.availableRelease = nil
                     self.state = .failed(error?.localizedDescription ?? "-")
                     return
                 }
@@ -143,6 +160,13 @@ final class UpdateService: ObservableObject {
                 ) {
                     let versionClean = chosen.tagName.trimmingCharacters(in: CharacterSet(charactersIn: "vV "))
                     self.availableNotes = ReleaseNotes.inAppUpdateNotes(from: chosen.body)
+                    let source = releases.first { $0.tagName == chosen.tagName }
+                    let title = source?.name?.trimmingCharacters(in: .whitespacesAndNewlines)
+                    self.availableRelease = ReleaseInfo(
+                        version: versionClean,
+                        title: (title?.isEmpty == false) ? title : nil,
+                        body: chosen.body,
+                        pageURL: source?.htmlURL)
                     self.state = .available(version: versionClean)
                     // Notify once per distinct release, not on every hourly re-check.
                     if !manual, versionClean != self.notifiedVersion {
@@ -153,6 +177,7 @@ final class UpdateService: ObservableObject {
                     }
                 } else {
                     self.availableNotes = nil
+                    self.availableRelease = nil
                     self.state = .upToDate
                 }
             }
@@ -169,6 +194,49 @@ final class UpdateService: ObservableObject {
         check(manual: false)
     }
 
+    /// Opens the release page in the default browser. Only ever called from
+    /// a click; the sealed build never fetches the page itself.
+    func openReleasePage() {
+        guard let url = availableRelease?.pageURL,
+              url.scheme?.lowercased() == "https",
+              url.host?.lowercased() == "github.com"
+        else { return }
+        NSWorkspace.shared.open(url)
+    }
+
+    /// First `maxLines` content lines of a release body with markdown
+    /// headers, list markers, block quotes and bold/italic markers stripped;
+    /// blank lines and the distribution footer are dropped.
+    static func changelogExcerpt(from body: String?, maxLines: Int = 8) -> String? {
+        guard let cleaned = ReleaseNotes.inAppUpdateNotes(from: body) else { return nil }
+        var lines: [String] = []
+        var truncated = false
+        for raw in cleaned.components(separatedBy: .newlines) {
+            var line = raw.trimmingCharacters(in: .whitespaces)
+            guard !line.isEmpty else { continue }
+            if line.allSatisfy({ $0 == "-" || $0 == "*" || $0 == "_" }) { continue }
+            while line.hasPrefix("#") { line.removeFirst() }
+            while line.hasPrefix(">") { line.removeFirst() }
+            line = line.trimmingCharacters(in: .whitespaces)
+            for marker in ["- ", "* ", "+ "] where line.hasPrefix(marker) {
+                line.removeFirst(marker.count)
+                line = "• " + line.trimmingCharacters(in: .whitespaces)
+                break
+            }
+            line = line.replacingOccurrences(of: "**", with: "")
+                .replacingOccurrences(of: "__", with: "")
+                .replacingOccurrences(of: "`", with: "")
+            guard !line.isEmpty else { continue }
+            if lines.count == maxLines {
+                truncated = true
+                break
+            }
+            lines.append(line)
+        }
+        guard !lines.isEmpty else { return nil }
+        return lines.joined(separator: "\n") + (truncated ? "\n…" : "")
+    }
+
     // MARK: - Version compare
 
     /// True when `latest` is a higher semantic version than `current`.
@@ -181,6 +249,8 @@ final class UpdateService: ObservableObject {
 
 private struct GitHubRelease: Decodable {
     let tagName: String
+    let name: String?
+    let htmlURL: URL?
     let prerelease: Bool?
     let draft: Bool?
     let assets: [Asset]
@@ -188,6 +258,8 @@ private struct GitHubRelease: Decodable {
 
     enum CodingKeys: String, CodingKey {
         case tagName = "tag_name"
+        case name
+        case htmlURL = "html_url"
         case prerelease
         case draft
         case assets

@@ -2295,9 +2295,10 @@ private extension UpdateService.State {
 
 // MARK: - Update banner
 
-/// Discreet "update available" row shown above everything when a newer release
-/// is found. Sealed fork: tapping it opens the release notes and the
-/// rebuild-from-source notice; nothing is downloaded.
+/// Discreet "update available" card shown above everything when a newer
+/// release is found. Sealed fork: it carries the release's own title and the
+/// first lines of its changelog, opens the release notes on a tap and the
+/// GitHub release page on its button; nothing is downloaded.
 struct UpdateBanner: View {
     @ObservedObject private var l10n = L10n.shared
     @ObservedObject private var updates = UpdateService.shared
@@ -2307,41 +2308,76 @@ struct UpdateBanner: View {
         case let .available(version):
             let isBeta = UpdateServiceSupport.SemanticVersion(raw: version)?.isPrerelease ?? false
             let tintColor: Color = isBeta ? .orange : .accentColor
+            let release = updates.availableRelease
 
-            Button {
-                appDelegate()?.showUpdatePreview()
-            } label: {
-                HStack(spacing: 9) {
-                    Image(systemName: "arrow.down.circle.fill")
-                        .font(.system(size: 16))
-                        .foregroundStyle(.white)
-                    VStack(alignment: .leading, spacing: 1) {
-                        Text(l10n.s.updateBannerTitle)
-                            .font(.system(size: 12, weight: .semibold))
+            VStack(alignment: .leading, spacing: 7) {
+                Button {
+                    appDelegate()?.showUpdatePreview()
+                } label: {
+                    HStack(spacing: 9) {
+                        Image(systemName: "arrow.down.circle.fill")
+                            .font(.system(size: 16))
                             .foregroundStyle(.white)
-                        // The title above already says an update is waiting,
-                        // so this line carries the version instead of saying
-                        // the same words a second time.
-                        Text("\(l10n.s.versionPrefix) \(version)")
-                            .font(.system(size: 10.5))
-                            .foregroundStyle(.white.opacity(0.85))
+                        VStack(alignment: .leading, spacing: 1) {
+                            Text(l10n.s.updateBannerTitle)
+                                .font(.system(size: 12, weight: .semibold))
+                                .foregroundStyle(.white)
+                            // The title above already says an update is
+                            // waiting, so this line carries the version and
+                            // the release's own title.
+                            Text(release?.title.map { "\(l10n.s.versionPrefix) \(version) — \($0)" }
+                                 ?? "\(l10n.s.versionPrefix) \(version)")
+                                .font(.system(size: 10.5))
+                                .foregroundStyle(.white.opacity(0.85))
+                                .lineLimit(2)
+                        }
+                        Spacer()
+                        Text(l10n.s.tabReleaseNotes)
+                            .font(.system(size: 11, weight: .semibold))
+                            .foregroundStyle(tintColor)
+                            .padding(.horizontal, 10)
+                            .padding(.vertical, 4)
+                            .background(Capsule().fill(.white))
                     }
-                    Spacer()
-                    Text(l10n.s.tabReleaseNotes)
-                        .font(.system(size: 11, weight: .semibold))
-                        .foregroundStyle(tintColor)
-                        .padding(.horizontal, 10)
-                        .padding(.vertical, 4)
-                        .background(Capsule().fill(.white))
+                    .contentShape(Rectangle())
                 }
-                .padding(.horizontal, 12)
-                .padding(.vertical, 9)
-                .background(
-                    RoundedRectangle(cornerRadius: 10, style: .continuous)
-                        .fill(tintColor)
-                )
+                .buttonStyle(.plain)
+
+                if let excerpt = release?.excerpt {
+                    Text(excerpt)
+                        .font(.system(size: 10.5))
+                        .foregroundStyle(.white.opacity(0.9))
+                        .fixedSize(horizontal: false, vertical: true)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
+
+                HStack(spacing: 8) {
+                    if release?.pageURL != nil {
+                        Button {
+                            updates.openReleasePage()
+                        } label: {
+                            Label(SealedBuild.openReleasePageTitle, systemImage: "arrow.up.right.square")
+                                .font(.system(size: 10.5, weight: .semibold))
+                                .foregroundStyle(tintColor)
+                                .padding(.horizontal, 9)
+                                .padding(.vertical, 4)
+                                .background(Capsule().fill(.white))
+                        }
+                        .buttonStyle(.plain)
+                    }
+                    Text(SealedBuild.updateNotice)
+                        .font(.system(size: 9.5))
+                        .foregroundStyle(.white.opacity(0.75))
+                        .lineLimit(2)
+                    Spacer(minLength: 0)
+                }
             }
-            .buttonStyle(.plain)
+            .padding(.horizontal, 12)
+            .padding(.vertical, 9)
+            .background(
+                RoundedRectangle(cornerRadius: 10, style: .continuous)
+                    .fill(tintColor)
+            )
         default:
             EmptyView()
         }

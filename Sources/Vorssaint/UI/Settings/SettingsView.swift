@@ -561,7 +561,30 @@ struct UpdatesView: View {
             }
 
             if case .available = updates.state {
-                // Sealed fork: no download or install path exists in this build.
+                // Sealed fork: no download or install path exists in this
+                // build; the release's own title and notes are shown instead,
+                // with a link to its page.
+                if let release = updates.availableRelease {
+                    VStack(alignment: .leading, spacing: 4) {
+                        if let title = release.title {
+                            Text(title)
+                                .font(.callout.weight(.semibold))
+                        }
+                        if let excerpt = release.excerpt {
+                            Text(excerpt)
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                                .fixedSize(horizontal: false, vertical: true)
+                                .textSelection(.enabled)
+                        }
+                        if release.pageURL != nil {
+                            Button(SealedBuild.openReleasePageTitle) {
+                                updates.openReleasePage()
+                            }
+                            .controlSize(.small)
+                        }
+                    }
+                }
                 Label(SealedBuild.updateNotice, systemImage: "lock.shield")
                     .font(.caption)
                     .foregroundStyle(.secondary)
