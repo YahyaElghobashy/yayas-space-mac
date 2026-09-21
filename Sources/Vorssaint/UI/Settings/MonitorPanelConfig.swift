@@ -25,6 +25,7 @@ struct MonitorPanelConfig: View {
     @AppStorage(DefaultsKey.monitorNetSpeed) private var netSpeed = true
     @AppStorage(DefaultsKey.monitorNetApps) private var netApps = true
     @AppStorage(DefaultsKey.monitorNetTotals) private var netTotals = true
+    @AppStorage(DefaultsKey.monitorNetTest) private var netTest = true
 
     @AppStorage(DefaultsKey.monitorShowDisk) private var showDisk = true
     @AppStorage(DefaultsKey.monitorDiskUsage) private var diskUsage = true
@@ -65,6 +66,7 @@ struct MonitorPanelConfig: View {
                 Toggle(l10n.s.monitorItemNetSpeed, isOn: $netSpeed)
                 Toggle(l10n.s.networkApps, isOn: $netApps)
                 Toggle(l10n.s.monitorItemNetTotals, isOn: $netTotals)
+                Toggle(l10n.s.monitorItemNetTest, isOn: $netTest)
             }
         }
         if AppFeature.monitorDisk.isAvailable {

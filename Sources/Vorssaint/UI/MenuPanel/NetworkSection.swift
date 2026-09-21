@@ -14,6 +14,7 @@ struct NetworkSection: View {
     @AppStorage(DefaultsKey.monitorNetSpeed) private var netSpeed = true
     @AppStorage(DefaultsKey.monitorNetApps) private var netApps = true
     @AppStorage(DefaultsKey.monitorNetTotals) private var netTotals = true
+    @AppStorage(DefaultsKey.monitorNetTest) private var netTest = true
     @AppStorage(DefaultsKey.panelNetworkOrder) private var networkOrderRaw = ""
     @State private var draggingBlock: Block?
     @State private var appRows: [ProcessUsage] = []
@@ -74,7 +75,7 @@ struct NetworkSection: View {
         }
     }
 
-    private enum Block: String, PanelOrderItem { case speed, apps, totals }
+    private enum Block: String, PanelOrderItem { case speed, apps, totals, test }
 
     private var visibleBlocks: [Block] {
         orderedBlocks.filter(isVisible)
@@ -102,6 +103,7 @@ struct NetworkSection: View {
         case .speed: return netSpeed
         case .apps: return netApps
         case .totals: return netTotals
+        case .test: return netTest
         }
     }
 
@@ -111,6 +113,7 @@ struct NetworkSection: View {
         netSpeed = true
         netApps = true
         netTotals = true
+        netTest = true
     }
 
     @ViewBuilder
@@ -119,6 +122,7 @@ struct NetworkSection: View {
         case .speed: speedBlock(editing: editing)
         case .apps: appUsageBlock(editing: editing)
         case .totals: totalsRow(editing: editing)
+        case .test: speedTestRow(editing: editing)
         }
     }
 
@@ -240,6 +244,23 @@ struct NetworkSection: View {
                 }
                 if editing {
                     PanelInlineHideButton(isVisible: $netTotals)
+                }
+            }
+        }
+    }
+
+    /// Sealed fork: local tools only (networkQuality run as a Process, or
+    /// Speedtest.app launched); the app opens no socket for this.
+    @ViewBuilder
+    private func speedTestRow(editing: Bool) -> some View {
+        if !netTest {
+            PanelHiddenItemRow(title: l10n.s.monitorItemNetTest,
+                               systemImage: "gauge.with.dots.needle.67percent",
+                               isVisible: $netTest)
+        } else {
+            NetworkQualityControls {
+                if editing {
+                    PanelInlineHideButton(isVisible: $netTest)
                 }
             }
         }

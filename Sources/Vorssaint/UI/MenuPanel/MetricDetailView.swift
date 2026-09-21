@@ -156,6 +156,9 @@ struct MetricDetailView: View {
         VStack(alignment: .leading, spacing: 10) {
             summaryCard
             detailCard
+            if kind == .network {
+                speedTestCard
+            }
             if kind.processKind != nil {
                 processCard
             }
@@ -284,6 +287,12 @@ struct MetricDetailView: View {
             }
         }
         .panelCard()
+    }
+
+    /// Sealed fork: local tools only; see NetworkQualityTool.
+    private var speedTestCard: some View {
+        NetworkQualityControls()
+            .panelCard()
     }
 
     private var processCard: some View {
