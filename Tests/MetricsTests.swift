@@ -9141,64 +9141,6 @@ struct MetricsTests {
             symbolicHotKeys: nil, role: .switcher),
                "the native exception stays scoped to the corresponding switcher action")
 
-        expect(UpdateInstallerSupport.progressStepAdvanced(from: nil, to: 0.004),
-               "the first known download fraction always publishes")
-        expect(!UpdateInstallerSupport.progressStepAdvanced(from: 0.011, to: 0.019),
-               "fractions inside the same percent stay quiet")
-        expect(UpdateInstallerSupport.progressStepAdvanced(from: 0.019, to: 0.021),
-               "crossing into the next percent publishes")
-        expect(!UpdateInstallerSupport.progressStepAdvanced(from: 0.5, to: 0.5),
-               "an unchanged fraction stays quiet")
-
-        let updateCeiling = UpdateInstallerSupport.downloadCeilingBytes
-        expect(UpdateInstallerSupport.downloadByteLimit(expectedBytes: 9_638_011) == 9_638_011,
-               "a download stops at the size the release advertises")
-        expect(UpdateInstallerSupport.downloadByteLimit(expectedBytes: nil) == updateCeiling,
-               "an asset with no size still stops at the ceiling")
-        expect(UpdateInstallerSupport.downloadByteLimit(expectedBytes: 0) == updateCeiling,
-               "a zero size is not a limit of zero")
-        expect(UpdateInstallerSupport.downloadByteLimit(expectedBytes: updateCeiling + 1) == updateCeiling,
-               "an advertised size beyond the ceiling cannot raise it")
-
-        expect(UpdateInstallerSupport.downloadIsUsable(status: 200,
-                                                       receivedBytes: 9_638_011,
-                                                       expectedBytes: 9_638_011),
-               "a complete asset download is handed to the installer")
-        expect(!UpdateInstallerSupport.downloadIsUsable(status: 404,
-                                                        receivedBytes: 1_200,
-                                                        expectedBytes: 9_638_011),
-               "an error page is refused whatever it contains")
-        expect(!UpdateInstallerSupport.downloadIsUsable(status: 200,
-                                                        receivedBytes: 4_000_000,
-                                                        expectedBytes: 9_638_011),
-               "a truncated body is refused")
-        expect(!UpdateInstallerSupport.downloadIsUsable(status: 200,
-                                                        receivedBytes: 0,
-                                                        expectedBytes: nil),
-               "an empty body is refused even with no advertised size")
-        expect(!UpdateInstallerSupport.downloadIsUsable(status: 200,
-                                                        receivedBytes: updateCeiling + 1,
-                                                        expectedBytes: nil),
-               "a body past the ceiling is refused with no advertised size")
-        expect(UpdateInstallerSupport.downloadIsUsable(status: 200,
-                                                       receivedBytes: 9_638_011,
-                                                       expectedBytes: nil),
-               "a plausible body with no advertised size is accepted")
-
-        // The showcase loader is a @StateObject, so it can be released without
-        // `.onDisappear` running. Its session holds the download delegate, and
-        // that delegate's deinit is what deletes the scratch file, so the
-        // release path has to invalidate the session too.
-        let showcaseSource = (try? String(
-            contentsOfFile: "Sources/Vorssaint/Services/Update/UpdateShowcaseMedia.swift",
-            encoding: .utf8)) ?? ""
-        let showcaseDeinitBody = (showcaseSource.components(separatedBy: "\n    deinit {")
-            .dropFirst().first ?? "").components(separatedBy: "\n    }").first ?? ""
-        expect(showcaseDeinitBody.contains("session?.invalidateAndCancel()"),
-               "a released showcase loader invalidates its session, freeing the delegate and its scratch file")
-        expect(!showcaseDeinitBody.contains("finishTasksAndInvalidate"),
-               "a released showcase loader cancels its download instead of letting it finish")
-
         expect(SettingsSearchSupport.matches(query: "", title: "Monitor"),
                "a blank settings search matches everything")
         expect(SettingsSearchSupport.matches(query: "moni", title: "Monitor"),
@@ -9653,15 +9595,6 @@ struct MetricsTests {
                 && verticalPlacement.frame.maxY == 472,
                "vertical avoidance moves settings below the panel with the standard gap")
 
-        expect(UpdateInstallerSupport.shouldForceAdminInstall(afterFailureCode: "fail-copy"),
-               "a copy failure retries through the admin prompt")
-        expect(UpdateInstallerSupport.shouldForceAdminInstall(afterFailureCode: "fail-swap"),
-               "a swap failure retries through the admin prompt")
-        expect(!UpdateInstallerSupport.shouldForceAdminInstall(afterFailureCode: "fail-verify"),
-               "a verification failure is not a permission problem")
-        expect(!UpdateInstallerSupport.shouldForceAdminInstall(afterFailureCode: nil),
-               "no remembered failure means the normal path")
-
         let adminSource = AdminShell.appleScriptSource(
             command: #"printf "quoted" \ path"#,
             prompt: #"Approve "update" \ now"#)
@@ -9704,81 +9637,11 @@ struct MetricsTests {
         expect(!MediaSupport.outputGrew(originalBytes: 0, outputBytes: 12_000),
                "an unknown original size never triggers the grew caption")
 
-        expect(UpdateInstallerSupport.shellSingleQuoted("/Applications/My App.app")
-                   == "'/Applications/My App.app'",
-               "shell quoting wraps paths with spaces")
-        expect(UpdateInstallerSupport.shellSingleQuoted("it's") == "'it'\\''s'",
-               "shell quoting survives embedded single quotes")
-        expect(UpdateInstallerSupport.installFailureCode(fromMarker: "ok\n") == nil,
-               "an ok marker is not a failure")
-        expect(UpdateInstallerSupport.installFailureCode(fromMarker: " fail-verify\n") == "fail-verify",
-               "a fail marker surfaces its step code")
-        expect(UpdateInstallerSupport.installFailureCode(fromMarker: "") == nil,
-               "an empty marker is not a failure")
-        expect(UpdateInstallerSupport.runsFromImmutableLocation(
-                   appPath: "/private/var/folders/ab/xyz/T/AppTranslocation/1F2/d/Vorssaint.app",
-                   volumeIsReadOnly: { _ in false }),
-               "translocated apps are flagged as not updatable in place")
-        expect(UpdateInstallerSupport.runsFromImmutableLocation(appPath: "/Volumes/Vorssaint/Vorssaint.app",
-                                                                volumeIsReadOnly: { _ in true }),
-               "apps on a read-only volume (the DMG) are flagged as not updatable in place")
-        expect(!UpdateInstallerSupport.runsFromImmutableLocation(appPath: "/Volumes/ExternalSSD/Vorssaint.app",
-                                                                 volumeIsReadOnly: { _ in false }),
-               "apps on a writable external volume stay updatable in place")
-        let installerScript = UpdateInstallerSupport.installerScript()
-        for step in ["fail-dmg-verify", "fail-tempdir", "fail-mount", "fail-no-app-in-dmg",
-                     "fail-copy", "fail-version", "fail-verify", "fail-swap", "note ok"] {
-            expect(installerScript.contains(step),
-                   "installer script reports the \(step) step")
+        // Sealed fork: UpdateInstallerSupport is gone with the installer; the
+        // detached-process probes below only need its shell quoting.
+        func shellSingleQuoted(_ value: String) -> String {
+            "'" + value.replacingOccurrences(of: "'", with: "'\\''") + "'"
         }
-        expect(installerScript.contains("spctl --status"),
-               "installer script skips Gatekeeper assessment when the user disabled it")
-        let dmgVerification = installerScript.range(of: "DMG_VERIFY_REQ")
-        let dmgMount = installerScript.range(of: "/usr/bin/hdiutil attach")
-        expect(dmgVerification != nil && dmgMount != nil
-               && dmgVerification!.lowerBound < dmgMount!.lowerBound,
-               "installer verifies the release signer before mounting the DMG")
-        expect(installerScript.contains("BUNDLE_VERSION=")
-               && installerScript.contains("\"$BUNDLE_VERSION\" = \"$EXPECTED_VERSION\""),
-               "installer requires the signed app to match the offered release version")
-        expect(installerScript.contains("chown -R"),
-               "an elevated install hands the bundle back to the user")
-        expect(installerScript.contains("update-old.$PID"),
-               "the swap backup name is unique per run so a stale root-owned one never blocks it")
-        expect(installerScript.contains("launchctl asuser"),
-               "installer script relaunches as the user when running as root")
-        expect(installerScript.contains("$RESULT.progress") && installerScript.contains("finalize"),
-               "installer markers stay in a progress file until the run finishes")
-        expect(installerScript.contains("/usr/bin/sudo -n -u \"#$ASUSER\" /bin/sh -c")
-                && installerScript.contains("'/bin/echo \"$1\" > \"$2.progress\"' marker \"$1\" \"$RESULT\"")
-                && installerScript.contains("/usr/bin/sudo -n -u \"#$ASUSER\" /bin/mv -f")
-                && !installerScript.contains("note() { /bin/echo \"$1\" > \"$RESULT.progress\""),
-               "elevated marker writes drop to the original user's credentials")
-        let elevated = UpdateInstallerSupport.elevatedInstallCommand(
-            appPath: "/Applications/Vorssaint.app",
-            dmgPath: "/tmp/Vorssaint-update.dmg",
-            pid: 123,
-            resultPath: "/tmp/result",
-            uid: 501,
-            expectedVersion: "3.3.3")
-        expect(elevated.contains("POSIX::setsid()") && elevated.hasSuffix("&"),
-               "elevated installer leaves this app's session so it outlives the app it replaces")
-        expect(elevated.contains("nohup"),
-               "elevated installer keeps the nohup fallback if setsid is unavailable")
-        expect(elevated.contains("'/Applications/Vorssaint.app'"),
-               "elevated installer passes the app path quoted for the shell")
-        expect(elevated.contains("'3.3.3'"),
-               "elevated installer passes the expected version quoted for the shell")
-        // The script travels inline and is long; it must be spelled once, with
-        // both the setsid attempt and the fallback reusing the same "$@".
-        expect(elevated.components(separatedBy: "DMG_VERIFY_REQ=").count == 2
-               && elevated.components(separatedBy: "\"$@\"").count == 3,
-               "elevated installer names its arguments once and reuses them for the fallback")
-
-        // The fallback branch has to be chosen on whether perl is there, never
-        // on an exit code: perl execs the payload, so the status the shell sees
-        // is the payload's own. Every `exit 1` inside the installer script would
-        // otherwise start the whole installer a second time, as root.
         let detachRoot = FileManager.default.temporaryDirectory
             .appendingPathComponent("VorssaintDetachTests-\(UUID().uuidString)")
         try? FileManager.default.createDirectory(at: detachRoot, withIntermediateDirectories: true)
@@ -9788,7 +9651,7 @@ struct MetricsTests {
             .write(to: detachPayload, atomically: true, encoding: .utf8)
         let detachCommand = DetachedProcess.detachedShellCommand(
             quotedArgv: ["/bin/sh", detachPayload.path, detachLedger.path]
-                .map(UpdateInstallerSupport.shellSingleQuoted)
+                .map(shellSingleQuoted)
                 .joined(separator: " "))
         let detachShell = Process()
         detachShell.executableURL = URL(fileURLWithPath: "/bin/sh")
@@ -9838,7 +9701,7 @@ struct MetricsTests {
         do {
             let probe = "{ /bin/echo leaked >&\(holderDescriptor); } 2>/dev/null; INHERITED=$?; "
                 + "{ /bin/echo stdio; } 2>/dev/null; STDIO=$?; "
-                + "/bin/echo \"$INHERITED $STDIO\" > \(UpdateInstallerSupport.shellSingleQuoted(fdReport.path))"
+                + "/bin/echo \"$INHERITED $STDIO\" > \(shellSingleQuoted(fdReport.path))"
             let child = try DetachedProcess.spawn("/bin/sh", ["-c", probe])
             var reaped: Int32 = 0
             waitpid(child, &reaped, 0)
@@ -12880,12 +12743,6 @@ struct MetricsTests {
         expectEqual(HomebrewCommandBuilder.shellEnvLine(brewPath: brewPath, shellPath: "/opt/homebrew/bin/fish"),
                     "eval (/opt/homebrew/bin/brew shellenv fish)",
                     "Homebrew shell setup line matches the interactive shell")
-        expectEqual(HomebrewAnalytics.url(kind: .formula).absoluteString,
-                    "https://formulae.brew.sh/api/analytics/install-on-request/homebrew-core/30d.json",
-                    "Homebrew formula popularity uses install-on-request analytics")
-        expectEqual(HomebrewAnalytics.url(kind: .cask).absoluteString,
-                    "https://formulae.brew.sh/api/analytics/cask-install/homebrew-cask/30d.json",
-                    "Homebrew cask popularity uses cask install analytics")
         expectEqual(HomebrewAnalytics.compactCount(999), "999", "Homebrew popularity under 1K stays plain")
         expectEqual(HomebrewAnalytics.compactCount(1_250), "1.2K", "Homebrew popularity compacts thousands")
         expectEqual(HomebrewAnalytics.compactCount(1_200_000), "1.2M", "Homebrew popularity compacts millions")
@@ -18867,43 +18724,6 @@ struct MetricsTests {
                "the recent captures shortcut defaults to control option command H")
         expect(ScreenshotShareDuration.allCases.map(\.rawValue) == [3_600, 21_600, 86_400],
                "temporary links allow only one, six or twenty-four hours")
-        let testShareEndpoint = ScreenshotSharingSupport.endpoint(
-            bundleIdentifier: ScreenshotSharingSupport.developerBundleIdentifier,
-            developerOverride: "https://test.example/")
-        expect(testShareEndpoint.absoluteString == "https://test.example"
-                && ScreenshotSharingSupport.endpoint(
-                    bundleIdentifier: "com.vorssaint.utils",
-                    developerOverride: "https://test.example").absoluteString
-                    == ScreenshotSharingSupport.productionEndpoint.absoluteString
-                && ScreenshotSharingSupport.endpoint(
-                    bundleIdentifier: ScreenshotSharingSupport.developerBundleIdentifier,
-                    developerOverride: "http://test.example")
-                    == ScreenshotSharingSupport.productionEndpoint,
-               "only the Developer build accepts a valid HTTPS test endpoint")
-        expect(ScreenshotSharingSupport.uploadURL(endpoint: testShareEndpoint,
-                                                  duration: .sixHours)?.absoluteString
-                == "https://test.example/v1/screenshots?expiresIn=21600",
-               "sharing builds the fixed upload route and expiration query")
-        let shareNow = Date(timeIntervalSince1970: 1_000)
-        let shareResponse = ScreenshotShareResponse(
-            id: String(repeating: "a", count: 32),
-            viewPath: "/s/\(String(repeating: "a", count: 32))",
-            expiresAt: "1970-01-01T01:16:40.125Z",
-            deleteToken: String(repeating: "b", count: 43))
-        expect(ScreenshotSharingSupport.record(response: shareResponse,
-                                                endpoint: testShareEndpoint,
-                                                now: shareNow)?.url.absoluteString
-                == "https://test.example/s/\(String(repeating: "a", count: 32))",
-               "a valid service response becomes an owner-held link record")
-        let forgedShareResponse = ScreenshotShareResponse(
-            id: "guessable",
-            viewPath: "/s/guessable",
-            expiresAt: "1970-01-01T01:16:40.125Z",
-            deleteToken: "short")
-        expect(ScreenshotSharingSupport.record(response: forgedShareResponse,
-                                                endpoint: testShareEndpoint,
-                                                now: shareNow) == nil,
-               "guessable ids and short deletion tokens are rejected")
         expect(Defaults.registeredDefaults[DefaultsKey.panelUtilityScreenshot] as? Bool == true,
                "the panel row ships visible like its siblings")
         let recentCaptureIDs = (0..<14).map { _ in UUID() }
@@ -21698,82 +21518,6 @@ struct MetricsTests {
             installed: caskRecords, apps: [renamedStoreApp]).isEmpty,
                "an old package receipt cannot claim the store edition of an app")
 
-        let publisherFeed = AppUpdateFeedSupport.feed(
-            info: ["SUFeedURL": "https://updates.example.com/feed.xml"], configuration: nil)
-        expect(publisherFeed?.format == .appcast, "the app's declared feed is a supported source")
-        let packagedFeed = AppUpdateFeedSupport.feed(info: [:], configuration:
-            "provider: generic\nurl: 'https://updates.example.com/stable'\n")
-        expect(packagedFeed?.url.absoluteString == "https://updates.example.com/stable/latest-mac.yml",
-               "packaged update configuration selects the Mac release manifest")
-        let hostedFeed = AppUpdateFeedSupport.feed(info: [:], configuration:
-            "provider: github\nowner: example\nrepo: editor\n")
-        expect(hostedFeed?.url.absoluteString == "https://github.com/example/editor/releases/latest/download/latest-mac.yml",
-               "an explicitly declared release repository supplies its Mac metadata")
-        for invalid in ["file:///tmp/feed.xml", "http://example.com/feed.xml",
-                        "https://user:password@example.com/feed.xml", "https://localhost/feed.xml",
-                        "https://127.0.0.1/feed.xml", "https://192.168.1.1/feed.xml"] {
-            expect(AppUpdateFeedSupport.publicURL(invalid) == nil,
-                   "feed discovery rejects local, insecure and credential-bearing URLs")
-        }
-        for invalid in ["provider: github\nowner: ../user\nrepo: editor",
-                        "provider: github\nowner: user\nrepo: editor\nprivate: true",
-                        "provider: generic\nurl: https://example.com\nchannel: beta",
-                        "provider: generic\nurl: https://example.com\nrequestHeaders:\n  Authorization: secret",
-                        "provider: custom\nurl: https://example.com",
-                        "provider: generic\nurl: https://example.com\nurl: https://other.example.com"] {
-            expect(AppUpdateFeedSupport.feed(info: [:], configuration: invalid) == nil,
-                   "private, ambiguous and unsupported update configuration is not guessed")
-        }
-        let appcast = Data(#"""
-        <rss xmlns:sparkle="http://www.andymatuschak.org/xml-namespaces/sparkle"><channel>
-          <item><sparkle:version>110</sparkle:version><sparkle:shortVersionString>1.1</sparkle:shortVersionString><sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion><enclosure url="https://example.com/app.zip" /></item>
-          <item><sparkle:version>200</sparkle:version><sparkle:shortVersionString>2.0</sparkle:shortVersionString><sparkle:minimumSystemVersion>27.0</sparkle:minimumSystemVersion><enclosure url="https://example.com/new.zip" /></item>
-          <item><sparkle:channel>beta</sparkle:channel><enclosure sparkle:version="300" sparkle:shortVersionString="3.0" url="https://example.com/beta.zip" /></item>
-          <item><enclosure sparkle:version="400" sparkle:shortVersionString="4.0" sparkle:os="windows" url="https://example.com/app.exe" /></item>
-          <item><sparkle:deltas><enclosure sparkle:version="500" sparkle:deltaFrom="100" url="https://example.com/app.delta" /></sparkle:deltas></item>
-        </channel></rss>
-        """#.utf8)
-        let feedApp = AppUpdatesSupport.InstalledApp(
-            name: "Editor", bundleID: "com.example.editor", path: "/Applications/Editor.app",
-            version: "1.0", isFromAppStore: false, buildVersion: "100")
-        let releases = AppUpdateFeedSupport.releases(data: appcast, format: .appcast) ?? []
-        func feedUpdate(_ releases: [AppUpdateFeedSupport.Release],
-                        format: AppUpdateFeedSupport.Format = .appcast) -> AppUpdatesSupport.Item? {
-            AppUpdateFeedSupport.update(app: feedApp, releases: releases, format: format,
-                                        operatingSystemVersion: "15.7", kernelVersion: "24.6.0",
-                                        architecture: "arm64")
-        }
-        expect(feedUpdate(releases)?.latestVersion == "1.1",
-               "feeds choose the newest compatible stable Mac release, not the first or largest entry")
-        expect(feedUpdate(releases)?.isSelectable == false && feedUpdate(releases)?.token == nil,
-               "publisher findings leave installation with the app's own updater")
-        expect(feedUpdate([.init(version: "101", displayVersion: "1.0", hasDownload: true)])?
-            .latestVersion == "1.0 (101)",
-               "new builds with the same visible version are detected and distinguished")
-        for excluded in [
-            AppUpdateFeedSupport.Release(version: "99", displayVersion: "2.0", hasDownload: true),
-            .init(version: "110", displayVersion: "1.1beta", hasDownload: true),
-            .init(version: "110", displayVersion: "1.1", maximumOS: "14.0", hasDownload: true),
-            .init(version: "110", displayVersion: "1.1", minimumInstalledVersion: "105", hasDownload: true),
-            .init(version: "110", displayVersion: "1.1", hardware: "x86_64", hasDownload: true),
-        ] {
-            expect(feedUpdate([excluded]) == nil,
-                   "older builds, preview releases and incompatible update paths are excluded")
-        }
-        for invalid in [Data("<rss><channel><item>".utf8), Data("<html/>".utf8),
-                        Data(#"<!DOCTYPE rss [<!ENTITY x "110">]><rss><channel><item><version>&x;</version></item></channel></rss>"#.utf8),
-                        Data(repeating: 32, count: AppUpdateFeedSupport.byteLimit + 1)] {
-            expect(AppUpdateFeedSupport.releases(data: invalid, format: .appcast) == nil,
-                   "malformed, non-feed, entity-bearing and oversized responses are rejected")
-        }
-        let manifest = Data("version: 1.2\nfiles:\n  - url: app.zip\nminimumSystemVersion: 24.0.0\n".utf8)
-        let manifestReleases = AppUpdateFeedSupport.releases(data: manifest, format: .manifest) ?? []
-        expect(feedUpdate(manifestReleases, format: .manifest)?.latestVersion == "1.2",
-               "Mac manifests compare visible app versions and use the kernel version for their OS requirement")
-        expect(feedUpdate([.init(version: "1.2", displayVersion: "1.2", minimumOS: "25.0.0", hasDownload: true)],
-                          format: .manifest) == nil,
-               "a manifest requiring a newer kernel cannot be offered")
-
         let onlineCatalogBody = Data(#"""
         [
           {"token":"notes-stable","version":"2.0,revision","artifacts":[{"uninstall":[{"quit":"com.example.notes"}]},{"app":["Notes.app"],"target":"/Applications/Notes.app"}],"depends_on":{"macos":{">=":["14"]}}},
@@ -22807,24 +22551,6 @@ struct MetricsTests {
 
         expect(RecordingShareDuration.allCases.map(\.rawValue) == [3_600, 21_600],
                "recording links allow only one or six hours")
-        let recordingShareEndpoint = RecordingSharingSupport.endpoint(
-            bundleIdentifier: RecordingSharingSupport.developerBundleIdentifier,
-            developerOverride: "https://test.example/")
-        expect(RecordingSharingSupport.uploadURL(endpoint: recordingShareEndpoint,
-                                                 duration: .sixHours)?.absoluteString
-                == "https://test.example/v1/recordings?expiresIn=21600",
-               "recording sharing uses its fixed endpoint and expiration query")
-        let recordingID = String(repeating: "r", count: 32)
-        let recordingResponse = RecordingShareResponse(
-            id: recordingID,
-            viewPath: "/s/\(recordingID)",
-            expiresAt: "1970-01-01T06:16:40.000Z",
-            deleteToken: String(repeating: "t", count: 43))
-        expect(RecordingSharingSupport.record(response: recordingResponse,
-                                              endpoint: recordingShareEndpoint,
-                                              now: Date(timeIntervalSince1970: 1_000))?.id
-                == recordingID,
-               "a valid six-hour recording response becomes an owner-held record")
         let recordingPlan = RecordingSharingSupport.encodingPlan(
             duration: 30,
             baseSize: CGSize(width: 3840, height: 2160),

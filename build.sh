@@ -290,6 +290,7 @@ if (( TEST )); then
         Sources/Vorssaint/Core/FanControlStrings.swift \
         Sources/Vorssaint/Services/FanControl/FanControlSupport.swift \
         Sources/Vorssaint/Services/Snippets/TextSnippetSupport.swift \
+        Sources/Vorssaint/Sealed/NetworkPolicy.swift \
         Sources/Vorssaint/Services/RadialMenu/RadialMenuSupport.swift \
         Sources/Vorssaint/Services/QuickTools/ScratchpadSupport.swift \
         Sources/Vorssaint/Services/QuickTools/ScratchpadStore.swift \
@@ -330,7 +331,6 @@ if (( TEST )); then
         Sources/Vorssaint/Services/DockPreview/DockPreviewSupport.swift \
         Sources/Vorssaint/Services/Homebrew/HomebrewSupport.swift \
         Sources/Vorssaint/Services/AppUpdates/AppUpdatesSupport.swift \
-        Sources/Vorssaint/Services/AppUpdates/AppUpdateFeedSupport.swift \
         Sources/Vorssaint/Core/AppUpdateStrings.swift \
         Sources/Vorssaint/Core/DiskImageInstallerStrings.swift \
         Sources/Vorssaint/Services/DiskImageInstaller/DiskImageInstallerSupport.swift \
@@ -339,7 +339,6 @@ if (( TEST )); then
         Sources/Vorssaint/Services/AutoQuit/AutoQuitSupport.swift \
         Sources/Vorssaint/Services/Shelf/ShelfSupport.swift \
         Sources/Vorssaint/Services/Finder/FinderRenameSupport.swift \
-        Sources/Vorssaint/Services/Update/UpdateInstallerSupport.swift \
         Sources/Vorssaint/Services/Update/UpdateServiceSupport.swift \
         Sources/Vorssaint/Services/InstalledApps.swift \
         Sources/Vorssaint/Services/LaunchAtLoginSupport.swift \
@@ -410,7 +409,6 @@ if (( TEST )); then
         Sources/Vorssaint/Services/ShellSupport.swift \
         Sources/Vorssaint/Services/Metrics/NetworkProcessSupport.swift \
         Sources/Vorssaint/Services/Metrics/NetworkSampler.swift \
-        Sources/Vorssaint/Services/Metrics/SpeedTest.swift \
         Sources/Vorssaint/Services/Metrics/PeripheralBatterySupport.swift \
         Sources/Vorssaint/Services/Metrics/DiskSupport.swift \
         Sources/Vorssaint/Services/Metrics/MonitorSamplingPolicy.swift \
@@ -535,7 +533,7 @@ if (( DEV )); then
     /usr/libexec/PlistBuddy -c "Set :CFBundleExecutable $EXECUTABLE" "$STAGE/Contents/Info.plist"
     # Sealed fork: the Developer variant carries its own version so About and
     # the update check can tell it apart from the upstream release it tracks.
-    SEALED_VERSION="$(/usr/libexec/PlistBuddy -c "Print :CFBundleShortVersionString" Resources/Info.plist)-sealed.1"
+    SEALED_VERSION="$(/usr/libexec/PlistBuddy -c "Print :CFBundleShortVersionString" Resources/Info.plist)-sealed.2"
     /usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString $SEALED_VERSION" "$STAGE/Contents/Info.plist"
     echo "  sealed version: $SEALED_VERSION"
     FAN_PLIST="$STAGE/Contents/Library/LaunchDaemons/$FAN_HELPER_ID.plist"
