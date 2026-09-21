@@ -84,12 +84,22 @@ enum LaunchAtLogin {
     }
 
     private static var locationIsUnstable: Bool {
-        UpdateInstallerSupport.runsFromImmutableLocation(
+        AppLocationSupport.runsFromImmutableLocation(
             appPath: Bundle.main.bundlePath,
             volumeIsReadOnly: { path in
                 let values = try? URL(fileURLWithPath: path)
                     .resourceValues(forKeys: [.volumeIsReadOnlyKey])
                 return values?.volumeIsReadOnly ?? true
             })
+    }
+}
+
+/// A translocated app or one on a read-only volume (the mounted DMG) cannot be
+/// registered as a stable login item. Kept from the upstream installer support
+/// after the installer itself was removed in the sealed fork.
+enum AppLocationSupport {
+    static func runsFromImmutableLocation(appPath: String,
+                                          volumeIsReadOnly: (String) -> Bool) -> Bool {
+        appPath.contains("/AppTranslocation/") || volumeIsReadOnly(appPath)
     }
 }

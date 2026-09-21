@@ -497,15 +497,6 @@ struct GeneralSettings: View {
                 }
                 .settingsSectionAnchor(.musicBlocking)
             }
-            Section(feedbackStrings.sectionTitle) {
-                Button {
-                    appDelegate()?.openFeedbackWindow()
-                } label: {
-                    Label(feedbackStrings.openButton,
-                          systemImage: "bubble.left.and.text.bubble.right")
-                }
-                SettingsCaptionText(feedbackStrings.sectionCaption)
-            }
         }
         .formStyle(.grouped)
     }
@@ -563,11 +554,17 @@ struct UpdatesView: View {
                 .disabled(isBusy)
 
                 if case .available = updates.state {
-                    Button(l10n.s.updateInstallButton) {
+                    Button(l10n.s.tabReleaseNotes) {
                         appDelegate()?.showUpdatePreview()
                     }
-                    .buttonStyle(.borderedProminent)
                 }
+            }
+
+            if case .available = updates.state {
+                // Sealed fork: no download or install path exists in this build.
+                Label(SealedBuild.updateNotice, systemImage: "lock.shield")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
             }
 
             if let lastChecked = updates.lastChecked {
@@ -589,15 +586,6 @@ struct UpdatesView: View {
             label(l10n.s.updateUpToDate, system: "checkmark.circle.fill", tint: .green)
         case let .available(version):
             label("\(l10n.s.updateAvailablePrefix) \(version)", system: "arrow.down.circle.fill", tint: .accentColor)
-        case let .downloading(progress):
-            if let progress {
-                label("\(l10n.s.updateDownloading) \(Int(progress * 100))%",
-                      system: "arrow.down.circle", tint: .secondary)
-            } else {
-                label(l10n.s.updateDownloading, system: "arrow.down.circle", tint: .secondary)
-            }
-        case .installing:
-            label(l10n.s.updateInstalling, system: "gearshape.2.fill", tint: .secondary)
         case let .failed(reason):
             label("\(l10n.s.updateFailedPrefix) \(reason)", system: "exclamationmark.triangle.fill", tint: .orange)
         }
@@ -613,7 +601,7 @@ struct UpdatesView: View {
 
     private var isBusy: Bool {
         switch updates.state {
-        case .checking, .downloading, .installing: return true
+        case .checking: return true
         default: return false
         }
     }

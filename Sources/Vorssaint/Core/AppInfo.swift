@@ -19,6 +19,16 @@ enum AppInfo {
         Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "dev"
     }
 
+    /// The upstream release this sealed build was made from: `version` minus the
+    /// `-sealed.N` suffix build.sh stamps on it. The update check compares this,
+    /// otherwise "3.3.5-sealed.1" would count as a pre-release of 3.3.5 and the
+    /// release it was built from would be offered as an update forever.
+    static var upstreamVersion: String {
+        let v = version
+        guard let range = v.range(of: "-\(SealedBuild.versionSuffix)") else { return v }
+        return String(v[..<range.lowerBound])
+    }
+
     /// True for the local "Vorssaint (Developer)" build (bundle id ends in `.dev`).
     /// It is never published and never auto-updates; all work is tested here first.
     static var isDeveloperBuild: Bool {
