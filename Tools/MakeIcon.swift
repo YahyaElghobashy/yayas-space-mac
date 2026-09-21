@@ -1,16 +1,30 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 Vorssaint
+// Copyright (C) 2026 Yahya Elghobashy (Yaya's Space icon)
 
-// Generates all icon assets:
-// - the app iconset and .icns from the exported Default rendition of the
-//   adaptive source (Resources/Brand/AppIcon-Default.png)
-// - the menu bar template glyph and BrandMark from the wordmark master
-//   (Resources/Brand/logo.png)
-// AppIcon-Default.png is a hand-exported twin of Resources/Brand/AppIcon.icon;
-// re-export it whenever the Icon Composer project changes. The build cannot read
-// .icon bundles directly: actool exists only inside full Xcode 26, and the
-// supported local floor is Command Line Tools alone.
+// Generates every icon asset for Yaya's Space from code, with no image
+// sources at all:
+// - the app iconset and .icns: a macOS-style rounded square on paper
+//   (#F8F5F0) with a plum (#46216B) bold "Y" from the system font
+// - the menu bar template glyph (MenuBarIcon.png / @2x): the same "Y", black
+//   on transparent, on the 26x20 pt canvas StatusItemController expects
+// - BrandMark.png: the trimmed "Y" as a white-on-transparent template image
+//   for in-app use (panel header, onboarding, About)
+//
+// Placeholder brand: swap in a real icon later by either editing the two
+// colours / glyph below, or by replacing renderAppIcon(px:) with a draw of
+// your own 1024x1024 master (see git history for the upstream version that
+// drew from Resources/Brand/AppIcon-Default.png). The Icon Composer catalog
+// in Resources/Brand/AppIcon.icon carries the matching vector mark for
+// builds that have actool (full Xcode 26+); without it the Dock falls back
+// to AppIcon.icns, which is what this script writes.
 import AppKit
+
+// MARK: - Brand
+
+let paper = NSColor(srgbRed: 0xF8 / 255, green: 0xF5 / 255, blue: 0xF0 / 255, alpha: 1)
+let plum = NSColor(srgbRed: 0x46 / 255, green: 0x21 / 255, blue: 0x6B / 255, alpha: 1)
+let glyphCharacter: Character = "Y"
 
 // Current macOS misreads PNG payloads in the legacy small chunks. It downsamples
 // ic07 for 1x and uses the explicit ic11/ic12 representations on Retina displays.
@@ -23,48 +37,42 @@ let iconSizes: [(name: String, px: Int, icnsType: String?)] = [
 ]
 
 let outDir = CommandLine.arguments.count > 1 ? CommandLine.arguments[1] : "AppIcon.iconset"
-let scriptDir = URL(fileURLWithPath: CommandLine.arguments[0]).deletingLastPathComponent()
-let projectDir = scriptDir.deletingLastPathComponent()
-let logoPath = projectDir.appendingPathComponent("Resources/Brand/logo.png").path
 
-guard let logo = NSImage(contentsOfFile: logoPath),
-      let logoTIFF = logo.tiffRepresentation,
-      let logoRep = NSBitmapImageRep(data: logoTIFF)
-else {
-    print("could not load \(logoPath)")
-    exit(1)
+// MARK: - Glyph
+
+/// The outline of the brand letter in the bold system font, as a path whose
+/// bounding box is known exactly, so it can be centred optically at any size.
+func glyphPath(pointSize: CGFloat) -> (path: CGPath, bounds: CGRect)? {
+    let font = NSFont.systemFont(ofSize: pointSize, weight: .heavy)
+    let ctFont = font as CTFont
+    var unichars = Array(String(glyphCharacter).utf16)
+    var glyphs = [CGGlyph](repeating: 0, count: unichars.count)
+    guard CTFontGetGlyphsForCharacters(ctFont, &unichars, &glyphs, unichars.count),
+          let glyph = glyphs.first,
+          let path = CTFontCreatePathForGlyph(ctFont, glyph, nil)
+    else { return nil }
+    return (path, path.boundingBoxOfPath)
 }
 
-let appIconPath = projectDir.appendingPathComponent("Resources/Brand/AppIcon-Default.png").path
-guard let appIconMaster = NSImage(contentsOfFile: appIconPath) else {
-    print("could not load \(appIconPath)")
-    exit(1)
+/// Fills the glyph so its ink box is centred in `target` (with an optional
+/// vertical nudge in fractions of the target height; a "Y" reads high, so a
+/// small drop settles it).
+func drawGlyph(in ctx: CGContext, target: CGRect, color: NSColor, drop: CGFloat = 0.03) {
+    // Scale from a reference size so the glyph fills the target height.
+    guard let reference = glyphPath(pointSize: 100) else { return }
+    let scale = min(target.height / reference.bounds.height, target.width / reference.bounds.width)
+    guard let sized = glyphPath(pointSize: 100 * scale) else { return }
+    let ink = sized.bounds
+    let dx = target.midX - ink.midX
+    let dy = target.midY - ink.midY - target.height * drop
+    var transform = CGAffineTransform(translationX: dx, y: dy)
+    guard let placed = sized.path.copy(using: &transform) else { return }
+    ctx.saveGState()
+    ctx.setFillColor(color.cgColor)
+    ctx.addPath(placed)
+    ctx.fillPath()
+    ctx.restoreGState()
 }
-
-/// Bounding box of visible (non-transparent) pixels, so the mark can be
-/// centered optically regardless of padding in the source file.
-func contentBounds(of rep: NSBitmapImageRep) -> CGRect {
-    var minX = rep.pixelsWide, minY = rep.pixelsHigh, maxX = 0, maxY = 0
-    for y in 0..<rep.pixelsHigh {
-        for x in 0..<rep.pixelsWide {
-            if let color = rep.colorAt(x: x, y: y), color.alphaComponent > 0.05 {
-                minX = min(minX, x); maxX = max(maxX, x)
-                minY = min(minY, y); maxY = max(maxY, y)
-            }
-        }
-    }
-    guard maxX > minX, maxY > minY else {
-        return CGRect(x: 0, y: 0, width: rep.pixelsWide, height: rep.pixelsHigh)
-    }
-    return CGRect(x: minX, y: minY, width: maxX - minX + 1, height: maxY - minY + 1)
-}
-
-let bounds = contentBounds(of: logoRep)
-// NSImage draws bottom-up while colorAt() is top-down — flip Y for drawing.
-let sourceRect = CGRect(x: bounds.minX,
-                        y: CGFloat(logoRep.pixelsHigh) - bounds.maxY,
-                        width: bounds.width,
-                        height: bounds.height)
 
 func bitmapCanvas(_ px: Int, _ py: Int) -> NSBitmapImageRep? {
     NSBitmapImageRep(bitmapDataPlanes: nil, pixelsWide: px, pixelsHigh: py,
@@ -73,76 +81,70 @@ func bitmapCanvas(_ px: Int, _ py: Int) -> NSBitmapImageRep? {
                      bytesPerRow: 0, bitsPerPixel: 0)
 }
 
-/// Draws the trimmed mark fitted into `target`, preserving aspect ratio.
-func drawMark(into target: CGRect) {
-    let scale = min(target.width / sourceRect.width, target.height / sourceRect.height)
-    let size = CGSize(width: sourceRect.width * scale, height: sourceRect.height * scale)
-    let rect = CGRect(x: target.midX - size.width / 2,
-                      y: target.midY - size.height / 2,
-                      width: size.width, height: size.height)
-    logo.draw(in: rect, from: sourceRect, operation: .sourceOver, fraction: 1,
-              respectFlipped: false, hints: [.interpolation: NSImageInterpolation.high.rawValue])
-}
-
 // MARK: - App icon
 
+/// macOS app icon grid: the rounded square sits on an 824/1024 footprint with
+/// continuous corners of about 22.4 % of its side; the remaining margin is the
+/// transparent gutter every Dock icon keeps.
 func renderAppIcon(px: Int) -> Data? {
     let size = CGFloat(px)
-    guard let rep = bitmapCanvas(px, px), let ctx = NSGraphicsContext(bitmapImageRep: rep) else { return nil }
+    guard let rep = bitmapCanvas(px, px), let gc = NSGraphicsContext(bitmapImageRep: rep) else { return nil }
     rep.size = NSSize(width: size, height: size)
+    let ctx = gc.cgContext
 
-    // Every renderer in MakeIcon.swift focuses the graphics context before
-    // drawing; without this the draws land nowhere and the PNGs come out empty.
     NSGraphicsContext.saveGraphicsState()
-    NSGraphicsContext.current = ctx
-    // The exported Default rendition is the finished icon design: background,
-    // layering and system-grid margins are baked in, so it maps onto the canvas
-    // 1:1 instead of being re-framed like the old mark-on-squircle composite.
-    // Source rect = the ENTIRE master, in the MASTER's coordinate space
-    // (appIconMaster.size), never the target's — a size-sized source rect would
-    // crop the bottom-left corner of the 1024x1024 master instead of scaling.
-    // (This SDK's draw(in:from:...) types from: as non-optional NSRect, so
-    // full-source must be spelled out rather than passed as nil.)
-    appIconMaster.draw(in: NSRect(x: 0, y: 0, width: size, height: size),
-                       from: NSRect(origin: .zero, size: appIconMaster.size),
-                       operation: .sourceOver, fraction: 1,
-                       respectFlipped: false,
-                       hints: [.interpolation: NSImageInterpolation.high.rawValue])
+    NSGraphicsContext.current = gc
+    ctx.clear(CGRect(x: 0, y: 0, width: size, height: size))
+
+    let inset = size * 100 / 1024
+    let square = CGRect(x: inset, y: inset, width: size - inset * 2, height: size - inset * 2)
+    let radius = square.width * 0.2237
+    let squircle = NSBezierPath(roundedRect: square, xRadius: radius, yRadius: radius)
+
+    // Soft shadow under the tile so it reads on light Finder backgrounds too.
+    ctx.saveGState()
+    ctx.setShadow(offset: CGSize(width: 0, height: -size * 0.012),
+                  blur: size * 0.03,
+                  color: NSColor.black.withAlphaComponent(0.18).cgColor)
+    paper.setFill()
+    squircle.fill()
+    ctx.restoreGState()
+
+    // Hairline edge so the paper tile has a boundary on white surfaces.
+    plum.withAlphaComponent(0.14).setStroke()
+    squircle.lineWidth = max(1, size / 512)
+    squircle.stroke()
+
+    let glyphBox = square.insetBy(dx: square.width * 0.24, dy: square.height * 0.24)
+    drawGlyph(in: ctx, target: glyphBox, color: plum)
+
     NSGraphicsContext.restoreGraphicsState()
     return rep.representation(using: .png, properties: [:])
 }
 
 // MARK: - Menu bar glyph (template)
 
-// The mark is ~1.97:1, so fitting it into a fixed box made the width the
-// limiting side and left the height unused, rendering it far shorter than the
-// menu bar icons around it. Size from the height and let the width follow.
-let menuBarGlyphHeight: CGFloat = 12.5
-// Centered geometrically the mark reads high, since the thin ring tails carry
-// the bounding box below the planet body. Drop it onto the same visual floor
-// as its neighbours.
-let menuBarGlyphDrop: CGFloat = 1
-// Taller than the mark needs: the same canvas holds the compact Keep Awake
-// symbols. Keep in sync with BlackHoleGlyph.pointSize in
-// Sources/YayasSpace/App/StatusItemController.swift; `--selftest` enforces it.
+// Compact glyph, height-driven, on a canvas that is taller than it needs so the
+// same canvas can hold the Keep Awake symbols. Keep in sync with
+// BlackHoleGlyph.pointSize in Sources/YayasSpace/App/StatusItemController.swift;
+// `--selftest` enforces it.
 let menuBarCanvas = (width: 26, height: 20)
+let menuBarGlyphHeight: CGFloat = 14
 
 func renderMenuBarIcon(scale: Int) -> Data? {
     let width = menuBarCanvas.width * scale, height = menuBarCanvas.height * scale
-    guard let rep = bitmapCanvas(width, height), let ctx = NSGraphicsContext(bitmapImageRep: rep) else { return nil }
+    guard let rep = bitmapCanvas(width, height), let gc = NSGraphicsContext(bitmapImageRep: rep) else { return nil }
     rep.size = NSSize(width: menuBarCanvas.width, height: menuBarCanvas.height)
-
     NSGraphicsContext.saveGraphicsState()
-    NSGraphicsContext.current = ctx
-    // Height-limited target spanning the full canvas width: drawMark keeps the
-    // aspect ratio and centers, landing the mark at 24.6×12.5 pt. Coordinates
-    // are bottom-up, so dropping it lowers y.
+    NSGraphicsContext.current = gc
     let ink = menuBarGlyphHeight * CGFloat(scale)
-    let y = (CGFloat(height) - ink) / 2 - menuBarGlyphDrop * CGFloat(scale)
-    drawMark(into: CGRect(x: 0, y: y, width: CGFloat(width), height: ink))
+    let target = CGRect(x: 0, y: (CGFloat(height) - ink) / 2, width: CGFloat(width), height: ink)
+    drawGlyph(in: gc.cgContext, target: target, color: .black, drop: 0)
     NSGraphicsContext.restoreGraphicsState()
     return rep.representation(using: .png, properties: [:])
 }
+
+// MARK: - ICNS
 
 func appendFourCC(_ value: String, to data: inout Data) {
     data.append(contentsOf: value.utf8)
@@ -169,6 +171,8 @@ func writeICNS(entries: [(type: String, data: Data)], to url: URL) throws {
     try icns.write(to: url)
 }
 
+// MARK: - Main
+
 try? FileManager.default.createDirectory(atPath: outDir, withIntermediateDirectories: true)
 var icnsEntries: [(type: String, data: Data)] = []
 for (name, px, icnsType) in iconSizes {
@@ -192,14 +196,14 @@ for scale in [1, 2] {
     try data.write(to: URL(fileURLWithPath: "\(outDir)/../MenuBarIcon\(suffix).png"))
 }
 
-// Trimmed mark for in-app use (panel header, onboarding, About).
-let markWidth = 640
-let markHeight = Int(CGFloat(markWidth) * sourceRect.height / sourceRect.width)
-if let rep = bitmapCanvas(markWidth, markHeight), let ctx = NSGraphicsContext(bitmapImageRep: rep) {
-    rep.size = NSSize(width: markWidth, height: markHeight)
+// Trimmed mark for in-app use (template: white ink, transparent elsewhere).
+let markSize = 640
+if let rep = bitmapCanvas(markSize, markSize), let gc = NSGraphicsContext(bitmapImageRep: rep) {
+    rep.size = NSSize(width: markSize, height: markSize)
     NSGraphicsContext.saveGraphicsState()
-    NSGraphicsContext.current = ctx
-    drawMark(into: CGRect(x: 0, y: 0, width: CGFloat(markWidth), height: CGFloat(markHeight)))
+    NSGraphicsContext.current = gc
+    let box = CGRect(x: 0, y: 0, width: markSize, height: markSize).insetBy(dx: 16, dy: 16)
+    drawGlyph(in: gc.cgContext, target: box, color: .white, drop: 0)
     NSGraphicsContext.restoreGraphicsState()
     if let data = rep.representation(using: .png, properties: [:]) {
         try data.write(to: URL(fileURLWithPath: "\(outDir)/../BrandMark.png"))

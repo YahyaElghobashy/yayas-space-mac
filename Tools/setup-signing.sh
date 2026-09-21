@@ -2,26 +2,24 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Copyright (C) 2026 Vorssaint
 
-# Creates a stable, self-signed code-signing identity named "Yaya's Space Utils
+# Creates a stable, self-signed code-signing identity named "Yaya's Space
 # Signing" in a dedicated keychain. build.sh uses it automatically, giving every
 # build the same code signature — so macOS keeps granted permissions
 # (Accessibility, Screen Recording) across updates instead of re-prompting.
 #
-# This identity name keeps its original "Yaya's Space Utils Signing" on purpose: it
-# is the lookup key build.sh matches, and the released app's designated
-# requirement is pinned to this exact certificate. Renaming it would change that
-# requirement and drop every user's granted permissions. The name lives only in
-# the keychain and codesign output, never in anything the app shows.
+# This identity name is the lookup key build.sh matches, and a local build's
+# designated requirement is pinned to this exact certificate. Renaming it would
+# change that requirement and drop every granted permission. The name lives only
+# in the keychain and codesign output, never in anything the app shows.
 #
 # Free, offline, and idempotent (re-running is a no-op once a working identity exists).
 # It does NOT replace Apple notarization: downloaded builds still show Gatekeeper's
 # "unverified developer" prompt on first launch. It only stabilizes the identity.
 #
-# Maintainers: official releases use the protected release-signing environment.
-# Run this only to get the same permission-preserving behavior for local builds.
+# Yaya's Space has no notarized release channel; this is the only identity.
 set -euo pipefail
 
-IDENTITY="Yaya's Space Utils Signing"
+IDENTITY="Yaya's Space Signing"
 KC="$HOME/Library/Keychains/yayasspace-signing.keychain-db"
 KCPASS="yayasspace-signing"
 

@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Yaya's Space brand mark. Copyright (C) 2026 Yahya Elghobashy. GPL-3.0-or-later, like the rest of the repository.
+     Placeholder: a heavy system-font "Y" in plum (#46216B). Tools/MakeIcon.swift renders the raster twin at build time. -->
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
+  <text x="512" y="720" text-anchor="middle" font-family="-apple-system, 'SF Pro Display', 'Helvetica Neue', Arial, sans-serif" font-weight="900" font-size="620" fill="#46216B">Y</text>
+</svg>
