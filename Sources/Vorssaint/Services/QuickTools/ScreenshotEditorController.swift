@@ -1177,6 +1177,37 @@ final class ScreenshotEditorController: NSObject, NSWindowDelegate {
         }
     }
 
+    /// Sealed fork: stages the edited image as a local PNG and opens the
+    /// macOS share sheet on it. Nothing is uploaded by this app.
+    func shareSheet(_ anchor: LocalShareAnchor.Box, completion: @escaping () -> Void) {
+        guard let image = model.exportImage() else {
+            QuickToolHUD.show(icon: "square.and.arrow.up", message: strings.shareFailedHUD)
+            completion()
+            return
+        }
+        let prefix = strings.fileNamePrefix
+        Task { @MainActor [weak self] in
+            let url = await Task.detached(priority: .userInitiated) {
+                guard let data = ScreenshotRenderer.pngData(from: image) else { return nil as URL? }
+                return LocalShareSheet.stagePNG(data, fileNamePrefix: prefix)
+            }.value
+            guard let self, self.window != nil else {
+                completion()
+                return
+            }
+            guard let url else {
+                QuickToolHUD.show(icon: "square.and.arrow.up", message: self.strings.shareFailedHUD)
+                NSSound.beep()
+                completion()
+                return
+            }
+            anchor.present([url]) { [weak self] chosen in
+                if chosen { self?.model.markExported() }
+            }
+            completion()
+        }
+    }
+
     /// Every final output closes the editor: the capture leaves the app
     /// and the window's job is done, so nothing lingers to tidy up.
     func copyToClipboard() {

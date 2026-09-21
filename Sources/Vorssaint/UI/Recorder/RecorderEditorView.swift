@@ -15,8 +15,7 @@ struct RecorderEditorView: View {
     /// The area being drawn for a blur, in the stage's own points, while the
     /// mouse is down.
     @State private var blurDraft: CGRect?
-    /// Sealed fork: link sharing is removed; the preference is ignored.
-    private let sharingEnabled = false
+    @State private var shareAnchor = LocalShareAnchor.Box()
 
     private var strings: RecorderFeatureStrings {
         FeatureStrings.recorder(l10n.language)
@@ -119,9 +118,7 @@ struct RecorderEditorView: View {
                 .screenshotSafeHelp("⌘C")
             }
 
-            if sharingEnabled {
-                shareMenu
-            }
+            shareButton
 
             Menu {
                 Button(strings.saveVideoButton, action: controller.saveVideo)
@@ -148,23 +145,19 @@ struct RecorderEditorView: View {
         .overlay(alignment: .bottom) { Divider().opacity(0.45) }
     }
 
-    private var shareMenu: some View {
-        Menu {
-            ForEach(RecordingShareDuration.allCases) { duration in
-                Button(duration.title(screenshotStrings)) {
-                    controller.share(duration) { record in
-                        sharedRecord = record
-                    }
-                }
-            }
+    /// Sealed fork: the macOS share sheet on the exported MP4, in place of
+    /// the upstream temporary-link menu.
+    private var shareButton: some View {
+        Button {
+            controller.shareSheet(shareAnchor)
         } label: {
-            Image(systemName: "link")
+            Image(systemName: "square.and.arrow.up")
                 .frame(width: 24, height: 24)
         }
-        .menuStyle(.borderlessButton)
-        .fixedSize()
+        .buttonStyle(RecorderToolbarButtonStyle())
         .disabled(model.isExporting)
-        .screenshotSafeHelp(screenshotStrings.shareButton)
+        .background(LocalShareAnchor(box: shareAnchor))
+        .screenshotSafeHelp(screenshotStrings.shareButton + "…")
         .accessibilityLabel(screenshotStrings.shareButton)
     }
 

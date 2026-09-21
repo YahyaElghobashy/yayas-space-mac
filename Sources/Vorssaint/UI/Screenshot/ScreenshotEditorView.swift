@@ -24,8 +24,7 @@ struct ScreenshotEditorView: View {
     @AppStorage(DefaultsKey.screenshotToolOrder) private var toolOrderRaw =
         ScreenshotSupport.Tool.defaultOrderStorage
     @AppStorage(DefaultsKey.screenshotToolShortcutsEnabled) private var toolShortcutsEnabled = true
-    /// Sealed fork: link sharing is removed; the preference is ignored.
-    private let sharingEnabled = false
+    @State private var shareAnchor = LocalShareAnchor.Box()
 
     private var strings: ScreenshotFeatureStrings {
         FeatureStrings.screenshot(l10n.language)
@@ -738,10 +737,8 @@ struct ScreenshotEditorView: View {
 
             Divider().frame(height: 16).padding(.horizontal, 3)
 
-            if sharingEnabled {
-                shareMenu
-                Divider().frame(height: 16).padding(.horizontal, 3)
-            }
+            shareButton
+            Divider().frame(height: 16).padding(.horizontal, 3)
 
             Menu {
                 Button(strings.saveButton) {
@@ -778,17 +775,14 @@ struct ScreenshotEditorView: View {
         .shadow(color: .black.opacity(0.16), radius: 14, y: 4)
     }
 
-    private var shareMenu: some View {
-        Menu {
-            ForEach(ScreenshotShareDuration.allCases) { duration in
-                Button(duration.title(strings)) {
-                    commitEditingTextIfNeeded()
-                    sharing = true
-                    controller.share(duration: duration) { record in
-                        sharing = false
-                        sharedRecord = record
-                    }
-                }
+    /// Sealed fork: the macOS share sheet on the local PNG, in place of the
+    /// upstream temporary-link menu.
+    private var shareButton: some View {
+        Button {
+            commitEditingTextIfNeeded()
+            sharing = true
+            controller.shareSheet(shareAnchor) {
+                sharing = false
             }
         } label: {
             Group {
@@ -796,15 +790,15 @@ struct ScreenshotEditorView: View {
                     ProgressView()
                         .controlSize(.mini)
                 } else {
-                    Image(systemName: "link")
+                    Image(systemName: "square.and.arrow.up")
                 }
             }
             .frame(width: 24, height: 24)
         }
-        .menuStyle(.borderlessButton)
-        .fixedSize()
+        .buttonStyle(.borderless)
         .disabled(sharing)
-        .screenshotSafeHelp(sharing ? strings.sharingHUD : strings.shareButton)
+        .background(LocalShareAnchor(box: shareAnchor))
+        .screenshotSafeHelp(sharing ? strings.sharingHUD : strings.shareButton + "…")
         .accessibilityLabel(strings.shareButton)
     }
 

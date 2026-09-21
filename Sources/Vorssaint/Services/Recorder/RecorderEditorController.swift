@@ -1506,6 +1506,18 @@ final class RecorderEditorController: NSObject, NSWindowDelegate {
         }
     }
 
+    /// Sealed fork: exports the take as an MP4 into the local cache folder and
+    /// opens the macOS share sheet on it. Nothing is uploaded by this app.
+    func shareSheet(_ anchor: LocalShareAnchor.Box) {
+        guard let destination = copyDestination() else {
+            QuickToolHUD.show(icon: "square.and.arrow.up", message: strings.exportFailed)
+            return
+        }
+        run(.video, to: destination, rememberDestination: false) { url in
+            anchor.present([url])
+        }
+    }
+
     private func copyVideoAndDelete(_ deletesRecording: Bool) {
         guard let destination = copyDestination() else {
             QuickToolHUD.show(icon: "record.circle", message: strings.exportFailed)

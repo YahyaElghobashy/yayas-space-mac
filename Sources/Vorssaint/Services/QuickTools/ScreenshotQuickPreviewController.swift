@@ -34,8 +34,9 @@ final class ScreenshotQuickPreviewController {
     /// save-and-copy can succeed by halves, and only the done halves gray
     /// their buttons out. Empty means the action failed entirely.
     private let action: (Action) -> Set<Action>
-    private let share: (ScreenshotShareDuration,
-                        @escaping (ScreenshotShareRecord?) -> Void) -> Void
+    /// Sealed fork: writes the capture to a local PNG for the macOS share
+    /// sheet (no upload); nil when the file could not be written.
+    private let stageForSharing: (@escaping (URL?) -> Void) -> Void
     private let onClose: () -> Void
     private let model = ScreenshotQuickPreviewModel()
     private var panel: ScreenshotQuickPreviewPanel?
@@ -53,14 +54,13 @@ final class ScreenshotQuickPreviewController {
          strings: ScreenshotFeatureStrings,
          defaultAction: ScreenshotDefaultAction,
          action: @escaping (Action) -> Set<Action>,
-         share: @escaping (ScreenshotShareDuration,
-                           @escaping (ScreenshotShareRecord?) -> Void) -> Void,
+         stageForSharing: @escaping (@escaping (URL?) -> Void) -> Void,
          onClose: @escaping () -> Void) {
         self.capture = capture
         self.strings = strings
         self.defaultAction = defaultAction
         self.action = action
-        self.share = share
+        self.stageForSharing = stageForSharing
         self.onClose = onClose
     }
 
@@ -77,7 +77,7 @@ final class ScreenshotQuickPreviewController {
                                                           strings: self.strings)
                     ?? NSItemProvider()
             },
-            share: { [weak self] duration in self?.performShare(duration) },
+            shareSheet: { [weak self] anchor in self?.performShareSheet(anchor) },
             copySharedLink: { [weak self] in self?.copySharedLink() },
             deleteSharedLink: { [weak self] in self?.deleteSharedLink() },
             showQR: { [weak self] in self?.showQRResult() },
@@ -211,31 +211,33 @@ final class ScreenshotQuickPreviewController {
         close()
     }
 
-    private func performShare(_ duration: ScreenshotShareDuration) {
+    /// Sealed fork: "Share…" stages the capture as a PNG and opens the macOS
+    /// share sheet on it. The preview holds its auto-dismiss while the sheet
+    /// is up so the panel (and the sheet anchored to it) does not vanish.
+    private func performShareSheet(_ anchor: LocalShareAnchor.Box) {
         guard !closed, !model.sharing else { return }
         dismissWork?.cancel()
         dismissWork = nil
         model.sharing = true
-        share(duration) { [weak self] record in
-            guard let self, !self.closed else {
-                if let record {
-                    Task { @MainActor in
-                        try? await ScreenshotShareService.shared.delete(record)
-                    }
-                }
-                return
-            }
+        stageForSharing { [weak self] url in
+            guard let self, !self.closed else { return }
             self.model.sharing = false
-            guard let record else {
+            guard let url else {
+                NSSound.beep()
+                QuickToolHUD.show(icon: "square.and.arrow.up", message: self.strings.shareFailedHUD)
                 self.scheduleAutoDismiss()
                 return
             }
-            withAnimation(.spring(response: 0.3, dampingFraction: 0.86)) {
-                self.model.sharedRecord = record
+            let shown = anchor.present([url]) { [weak self] chosen in
+                guard let self, !self.closed else { return }
+                // A chosen destination is the capture leaving the app; a
+                // cancelled sheet keeps the full stay to act by hand.
+                self.autoDismissDuration = chosen ? 3 : 12
+                self.scheduleAutoDismiss()
             }
-            self.autoDismissDuration = 30
-            self.resizePanel(showingLink: true)
-            self.scheduleAutoDismiss()
+            if !shown {
+                self.scheduleAutoDismiss()
+            }
         }
     }
 
@@ -391,13 +393,12 @@ private struct ScreenshotQuickPreviewView: View {
     @ObservedObject var model: ScreenshotQuickPreviewModel
     let perform: (ScreenshotQuickPreviewController.Action) -> Void
     let dragItem: () -> NSItemProvider
-    let share: (ScreenshotShareDuration) -> Void
+    let shareSheet: (LocalShareAnchor.Box) -> Void
     let copySharedLink: () -> Void
     let deleteSharedLink: () -> Void
     let showQR: () -> Void
     let hoverChanged: (Bool) -> Void
-    /// Sealed fork: link sharing is removed; the preference is ignored.
-    private let sharingEnabled = false
+    @State private var shareAnchor = LocalShareAnchor.Box()
 
     var body: some View {
         VStack(spacing: 10) {
@@ -454,9 +455,7 @@ private struct ScreenshotQuickPreviewView: View {
                              disabled: model.disabledActions.contains(.copy)) {
                     perform(.copy)
                 }
-                if sharingEnabled, model.sharedRecord == nil {
-                    shareMenu
-                }
+                shareButton
                 Spacer(minLength: 4)
                 Button(strings.editButton) {
                     perform(.edit)
@@ -544,27 +543,27 @@ private struct ScreenshotQuickPreviewView: View {
         .accessibilityLabel(L10n.shared.s.qrResultTitle)
     }
 
-    private var shareMenu: some View {
-        Menu {
-            ForEach(ScreenshotShareDuration.allCases) { duration in
-                Button(duration.title(strings)) { share(duration) }
-            }
+    /// Sealed fork: the macOS share sheet on the local PNG, in place of the
+    /// upstream temporary-link menu.
+    private var shareButton: some View {
+        Button {
+            shareSheet(shareAnchor)
         } label: {
             Group {
                 if model.sharing {
                     ProgressView()
                         .controlSize(.small)
                 } else {
-                    Image(systemName: "link")
+                    Image(systemName: "square.and.arrow.up")
                 }
             }
             .frame(width: 22, height: 18)
         }
-        .menuStyle(.button)
         .buttonStyle(.bordered)
         .controlSize(.small)
         .disabled(model.sharing)
-        .screenshotSafeHelp(model.sharing ? strings.sharingHUD : strings.shareButton)
+        .background(LocalShareAnchor(box: shareAnchor))
+        .screenshotSafeHelp(strings.shareButton + "…")
         .accessibilityLabel(strings.shareButton)
     }
 
