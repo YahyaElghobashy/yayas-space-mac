@@ -244,9 +244,14 @@ enum SealedURLSession {
 enum SealedBuild {
     /// Shown wherever the upstream app offered to download and install an
     /// update. This fork never downloads anything; rebuild it from source.
-    static let updateNotice = "Sealed build — no auto-install. Rebuild the fork to adopt."
+    static let updateNotice = "Sealed build — no auto-install. Rebuild from source to adopt."
     static let openReleasePageTitle = "Open release page"
-    static let versionSuffix = "sealed"
+    /// "Upstream inspiration" notice: `%@` is the upstream version.
+    static let upstreamNoticeFormat = "\(AppInfo.upstreamName) upstream shipped v%@ — see what changed"
+    static let upstreamDismissTitle = "Dismiss"
+    /// Stamped by build.sh on local Developer builds ("1.0.0-dev"), stripped
+    /// again before the version is compared with our releases.
+    static let versionSuffix = "dev"
     /// App Updates → "Include other installed apps": in this build the source
     /// is the public Homebrew cask catalog only (no publisher feeds).
     static let onlineCatalogCaption = "Checks the public Homebrew cask catalog (formulae.brew.sh). "

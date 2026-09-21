@@ -146,12 +146,15 @@ enum UpdateServiceSupport {
     }
 
     /// Selects the best update candidate from a list of releases based on channel preferences.
+    /// `requireAsset` demands a .dmg asset (the upstream rule); Yaya's Space
+    /// ships as source, so its own check passes `false`.
     static func selectUpdate(from candidates: [ReleaseCandidate],
                              currentVersion: String,
-                             includeBetas: Bool) -> ReleaseCandidate? {
+                             includeBetas: Bool,
+                             requireAsset: Bool = true) -> ReleaseCandidate? {
         let eligible = candidates.filter { candidate in
             guard !candidate.isDraft else { return false }
-            guard candidate.dmgURL != nil else { return false }
+            guard !requireAsset || candidate.dmgURL != nil else { return false }
 
             let parsed = SemanticVersion(raw: candidate.tagName)
             let isBeta = candidate.isPrerelease || (parsed?.isPrerelease ?? false)

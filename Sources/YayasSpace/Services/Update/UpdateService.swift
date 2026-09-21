@@ -4,9 +4,11 @@
 import AppKit
 import Combine
 
-/// Checks GitHub Releases for a newer version. Sealed fork: this is the only
-/// network call in the app (one read-only GET through `SealedURLSession`), and
-/// nothing is ever downloaded or installed; the UI shows a notice instead.
+/// Checks GitHub Releases for a newer version of Yaya's Space, and separately
+/// whether the upstream project this fork is based on (Vorssaint) has shipped
+/// a new release worth a look. Sealed fork: both are read-only GETs to
+/// api.github.com through `SealedURLSession`, and nothing is ever downloaded
+/// or installed; the UI shows a notice instead.
 final class UpdateService: ObservableObject {
     static let shared = UpdateService()
 
@@ -39,9 +41,22 @@ final class UpdateService: ObservableObject {
         var excerpt: String? { UpdateService.changelogExcerpt(from: body) }
     }
 
+    /// "Upstream inspiration": the latest upstream release when its tag differs
+    /// from the one last dismissed, so the notice shows once per upstream
+    /// release. nil when there is nothing new (or the check has not run).
+    @Published private(set) var upstreamRelease: ReleaseInfo?
+
+    /// Our own releases. Yaya's Space ships as source (rebuild to adopt), so a
+    /// release without a .dmg asset still counts.
     private let repository = "YahyaElghobashy/yayas-space-mac"
+    /// The project this fork is based on. Read-only, same host, same toggle;
+    /// nothing from it is ever installed. Its releases are compared against
+    /// `lastSeenUpstreamTag`, never against our own version.
+    static let upstreamRepository = "vorssaint/vorssaint-utils"
     private var refreshTimer: Timer?
     private var notifiedVersion: String?   // last release we posted a notification for
+    private var upstreamCheckInFlight = false
+    private var upstreamTag: String?       // raw tag behind `upstreamRelease`, as GitHub spells it
 
     private init() {}
 
@@ -107,13 +122,12 @@ final class UpdateService: ObservableObject {
             ? "https://api.github.com/repos/\(repository)/releases?per_page=10"
             : "https://api.github.com/repos/\(repository)/releases/latest"
 
-        var request = URLRequest(url: URL(string: endpoint)!)
-        request.setValue("application/vnd.github+json", forHTTPHeaderField: "Accept")
-        request.setValue("Yaya's Space/\(AppInfo.version)", forHTTPHeaderField: "User-Agent")
-        request.cachePolicy = .reloadIgnoringLocalCacheData
+        let request = Self.releasesRequest(endpoint)
 
-        // The only network call in the sealed build. SealedURLSession refuses
-        // any host other than api.github.com before a task is created.
+        // One of the two update GETs in the sealed build (the other is
+        // checkUpstream, same host, same toggle). SealedURLSession refuses any
+        // host other than api.github.com before a task is created.
+        checkUpstream()
         SealedURLSession.get(request) { [weak self] data, _, error in
             guard let self else { return }
             DispatchQueue.main.async {
@@ -155,8 +169,9 @@ final class UpdateService: ObservableObject {
 
                 if let chosen = UpdateServiceSupport.selectUpdate(
                     from: candidates,
-                    currentVersion: AppInfo.upstreamVersion,
-                    includeBetas: self.includeBetaUpdates
+                    currentVersion: AppInfo.releaseVersion,
+                    includeBetas: self.includeBetaUpdates,
+                    requireAsset: false
                 ) {
                     let versionClean = chosen.tagName.trimmingCharacters(in: CharacterSet(charactersIn: "vV "))
                     self.availableNotes = ReleaseNotes.inAppUpdateNotes(from: chosen.body)
@@ -182,6 +197,67 @@ final class UpdateService: ObservableObject {
                 }
             }
         }
+    }
+
+    private static func releasesRequest(_ endpoint: String) -> URLRequest {
+        var request = URLRequest(url: URL(string: endpoint)!)
+        request.setValue("application/vnd.github+json", forHTTPHeaderField: "Accept")
+        request.setValue("YayasSpace/\(AppInfo.version)", forHTTPHeaderField: "User-Agent")
+        request.cachePolicy = .reloadIgnoringLocalCacheData
+        return request
+    }
+
+    // MARK: - Upstream inspiration
+
+    /// The upstream tag the person last dismissed (or that was current when
+    /// the notice was first shown), so each upstream release is surfaced once.
+    private var lastSeenUpstreamTag: String? {
+        get { UserDefaults.standard.string(forKey: DefaultsKey.lastSeenUpstreamTag) }
+        set { UserDefaults.standard.set(newValue, forKey: DefaultsKey.lastSeenUpstreamTag) }
+    }
+
+    /// Fetches the latest upstream release (stable only, `releases/latest`)
+    /// and publishes it when its tag is one we have not shown before. Runs
+    /// alongside every own-update check, under the same auto-check toggle.
+    private func checkUpstream() {
+        guard !upstreamCheckInFlight else { return }
+        upstreamCheckInFlight = true
+        let endpoint = "https://api.github.com/repos/\(Self.upstreamRepository)/releases/latest"
+        SealedURLSession.get(Self.releasesRequest(endpoint)) { [weak self] data, _, error in
+            guard let self else { return }
+            DispatchQueue.main.async {
+                self.upstreamCheckInFlight = false
+                guard let data, error == nil,
+                      let release = try? JSONDecoder().decode(GitHubRelease.self, from: data),
+                      release.draft != true
+                else { return }
+                let tag = release.tagName.trimmingCharacters(in: .whitespacesAndNewlines)
+                guard !tag.isEmpty, tag != self.lastSeenUpstreamTag else { return }
+                let title = release.name?.trimmingCharacters(in: .whitespacesAndNewlines)
+                self.upstreamTag = tag
+                self.upstreamRelease = ReleaseInfo(
+                    version: tag.trimmingCharacters(in: CharacterSet(charactersIn: "vV ")),
+                    title: (title?.isEmpty == false) ? title : nil,
+                    body: release.body,
+                    pageURL: release.htmlURL)
+            }
+        }
+    }
+
+    /// Hides the upstream notice until the next upstream release.
+    func dismissUpstreamRelease() {
+        if let upstreamTag { lastSeenUpstreamTag = upstreamTag }
+        upstreamTag = nil
+        upstreamRelease = nil
+    }
+
+    /// Opens the upstream release page in the browser (click only).
+    func openUpstreamReleasePage() {
+        guard let url = upstreamRelease?.pageURL,
+              url.scheme?.lowercased() == "https",
+              url.host?.lowercased() == "github.com"
+        else { return }
+        NSWorkspace.shared.open(url)
     }
 
     /// Re-checks only if the last check is stale — called when the app reactivates

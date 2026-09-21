@@ -528,14 +528,17 @@ if (( DEV )); then
     # A distinct identity so the Developer build installs and runs next to the
     # official app, with its own permissions, preferences and login item.
     /usr/libexec/PlistBuddy -c "Set :CFBundleIdentifier com.yahyaelghobashy.yayasspace.dev" "$STAGE/Contents/Info.plist"
-    /usr/libexec/PlistBuddy -c "Set :CFBundleName Yaya's Space (Developer)" "$STAGE/Contents/Info.plist"
-    /usr/libexec/PlistBuddy -c "Set :CFBundleDisplayName Yaya's Space (Developer)" "$STAGE/Contents/Info.plist"
+    # plutil rather than PlistBuddy: the apostrophe in the name trips
+    # PlistBuddy's command parser whatever the quoting.
+    plutil -replace CFBundleName -string "$APP_NAME" "$STAGE/Contents/Info.plist"
+    plutil -replace CFBundleDisplayName -string "$APP_NAME" "$STAGE/Contents/Info.plist"
     /usr/libexec/PlistBuddy -c "Set :CFBundleExecutable $EXECUTABLE" "$STAGE/Contents/Info.plist"
-    # Sealed fork: the Developer variant carries its own version so About and
-    # the update check can tell it apart from the upstream release it tracks.
-    SEALED_VERSION="$(/usr/libexec/PlistBuddy -c "Print :CFBundleShortVersionString" Resources/Info.plist)-sealed.2"
-    /usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString $SEALED_VERSION" "$STAGE/Contents/Info.plist"
-    echo "  sealed version: $SEALED_VERSION"
+    # The Developer variant carries a "-dev" suffix so About can tell it apart
+    # from a release; AppInfo.releaseVersion strips it before comparing with
+    # the GitHub Releases of YahyaElghobashy/yayas-space-mac.
+    DEV_VERSION="$(/usr/libexec/PlistBuddy -c "Print :CFBundleShortVersionString" Resources/Info.plist)-dev"
+    /usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString $DEV_VERSION" "$STAGE/Contents/Info.plist"
+    echo "  developer version: $DEV_VERSION"
     FAN_PLIST="$STAGE/Contents/Library/LaunchDaemons/$FAN_HELPER_ID.plist"
     /usr/libexec/PlistBuddy -c "Set :Label $FAN_HELPER_ID" "$FAN_PLIST"
     /usr/libexec/PlistBuddy -c "Set :BundleProgram Contents/Library/LaunchServices/$FAN_HELPER_ID" "$FAN_PLIST"

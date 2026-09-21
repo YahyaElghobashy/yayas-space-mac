@@ -169,6 +169,7 @@ struct MenuPanelView: View {
         VStack(alignment: .leading, spacing: 12) {
             UpdateBanner()
                 .reportHeight($updateBannerHeight)
+            UpstreamInspirationBanner()
             header
             sectionNavigation
 
@@ -191,6 +192,7 @@ struct MenuPanelView: View {
         VStack(alignment: .leading, spacing: 12) {
             UpdateBanner()
                 .reportHeight($updateBannerHeight)
+            UpstreamInspirationBanner()
             header
 
             if let selectedMetric {

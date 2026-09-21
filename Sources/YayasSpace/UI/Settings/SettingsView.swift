@@ -590,6 +590,9 @@ struct UpdatesView: View {
                     .foregroundStyle(.secondary)
             }
 
+            // Yaya's Space: the upstream project's latest release, once per tag.
+            UpstreamInspirationRow()
+
             if let lastChecked = updates.lastChecked {
                 Text("\(l10n.s.updateLastChecked) \(Self.format(lastChecked))")
                     .font(.caption)
