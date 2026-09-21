@@ -663,7 +663,7 @@ enum RadialMenuSupport {
                 item.payload = normalized
             }
             if let customData = item.customIconData {
-                if customData.count > RadialMenuCustomIconLimits.maxStoredIconBytes || NSImage(data: customData) == nil {
+                if customData.count > RadialMenuFaviconFetcher.maxStoredIconBytes || NSImage(data: customData) == nil {
                     item.customIconData = nil
                 }
             }
@@ -781,7 +781,7 @@ enum RadialMenuSupport {
     /// the starter profile.
     ///
     /// Walks every item on every wheel and decodes each custom icon (up to
-    /// `RadialMenuCustomIconLimits.maxStoredIconBytes` of PNG apiece), so it
+    /// `RadialMenuFaviconFetcher.maxStoredIconBytes` of PNG apiece), so it
     /// belongs to settings and session start, never to an event-tap callback.
     /// A callback that only needs the summoner wants `claimedMouseButtons`.
     static func decodeProfiles(_ data: Data?, defaults: UserDefaults = .standard) -> [RadialMenuProfile] {
@@ -903,9 +903,101 @@ enum RadialMenuGeometry {
     }
 }
 
-/// Sealed fork: the on-demand favicon download that lived here is removed.
-/// Only the storage bound for a custom (user-picked) icon remains.
-enum RadialMenuCustomIconLimits {
+/// On-demand fetcher for website favicons, executed exclusively when explicitly
+/// requested by the user in the Settings editor.
+///
+/// Sealed fork: the download itself goes through
+/// `SealedURLSession.get(_:allowingHost:)`, which permits exactly the host of
+/// the URL the person typed, for this one click (GET, 5 s, 2 MB, same-origin
+/// redirects). No other host is ever contacted from here.
+enum RadialMenuFaviconFetcher {
     /// Max allowable icon data storage: 64KB
     static let maxStoredIconBytes = 65536
+    /// A favicon should be tiny. Stop the transfer itself at this bound so a
+    /// hostile response cannot be buffered into unbounded memory first.
+    static let maxDownloadBytes = 2 * 1_024 * 1_024
+    static let maxSourceDimension = 4_096
+    static let maxSourcePixels = 16_777_216
+
+    /// Fetches the favicon for a URL string on-demand.
+    /// Runs on a background task, calls completion on main queue.
+    static func fetchFavicon(for rawURL: String, completion: @escaping (Result<Data, Error>) -> Void) {
+        guard let url = faviconURL(for: rawURL), let host = url.host, !host.isEmpty else {
+            DispatchQueue.main.async {
+                completion(.failure(FaviconError.invalidURL))
+            }
+            return
+        }
+        var request = URLRequest(url: url,
+                                 cachePolicy: .reloadIgnoringLocalCacheData,
+                                 timeoutInterval: 5)
+        request.setValue("image/*", forHTTPHeaderField: "Accept")
+        SealedURLSession.get(request, allowingHost: host, byteLimit: maxDownloadBytes) { result in
+            DispatchQueue.main.async {
+                guard case let .success(data) = result,
+                      sourceDimensionsAreSafe(data),
+                      let image = NSImage(data: data),
+                      image.size.width > 0, image.size.height > 0,
+                      let pngData = scaledPNGData(from: image)
+                else {
+                    completion(.failure(FaviconError.notFound))
+                    return
+                }
+                completion(.success(pngData))
+            }
+        }
+    }
+
+    static func faviconURL(for rawURL: String) -> URL? {
+        guard let normalized = RadialMenuSupport.normalizedURL(rawURL),
+              let url = URL(string: normalized),
+              let scheme = url.scheme?.lowercased(),
+              scheme == "http" || scheme == "https",
+              url.host?.isEmpty == false,
+              var components = URLComponents(url: url, resolvingAgainstBaseURL: false)
+        else { return nil }
+        components.user = nil
+        components.password = nil
+        components.path = "/favicon.ico"
+        components.query = nil
+        components.fragment = nil
+        return components.url
+    }
+
+    static func sourceDimensionsAreSafe(_ data: Data) -> Bool {
+        guard let source = CGImageSourceCreateWithData(data as CFData, nil),
+              let properties = CGImageSourceCopyPropertiesAtIndex(source, 0, nil)
+                as? [CFString: Any],
+              let width = (properties[kCGImagePropertyPixelWidth] as? NSNumber)?.intValue,
+              let height = (properties[kCGImagePropertyPixelHeight] as? NSNumber)?.intValue,
+              width > 0, height > 0,
+              width <= maxSourceDimension, height <= maxSourceDimension,
+              width <= maxSourcePixels / height
+        else { return false }
+        return true
+    }
+
+    static func scaledPNGData(from image: NSImage, targetSize: CGFloat = 64) -> Data? {
+        let size = NSSize(width: targetSize, height: targetSize)
+        let newImage = NSImage(size: size)
+        newImage.lockFocus()
+        NSGraphicsContext.current?.imageInterpolation = .high
+        image.draw(in: NSRect(origin: .zero, size: size),
+                   from: NSRect(origin: .zero, size: image.size),
+                   operation: .copy,
+                   fraction: 1.0)
+        newImage.unlockFocus()
+
+        guard let tiffData = newImage.tiffRepresentation,
+              let bitmap = NSBitmapImageRep(data: tiffData),
+              let png = bitmap.representation(using: .png, properties: [:]) else {
+            return nil
+        }
+        return png.count <= maxStoredIconBytes ? png : nil
+    }
+
+    enum FaviconError: Error {
+        case invalidURL
+        case notFound
+    }
 }

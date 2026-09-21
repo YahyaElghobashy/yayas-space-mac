@@ -735,6 +735,13 @@ private struct RadialItemEditor: View {
     @ObservedObject private var l10n = L10n.shared
     @Environment(\.dismiss) private var dismiss
     @State private var shortcutMessage: ShortcutMessage?
+    @State private var isFetchingFavicon = false
+    @State private var faviconStatus: FaviconFetchStatus?
+
+    enum FaviconFetchStatus {
+        case success
+        case error
+    }
 
     /// What the line under the form is saying about the shortcut field: the
     /// calm hint while it listens, or the reason a press did not stick.
@@ -871,6 +878,7 @@ private struct RadialItemEditor: View {
             guard kind != item.kind else { return }
             item.kind = kind
             shortcutMessage = nil
+            faviconStatus = nil
             if kind != .url { item.customIconData = nil }
             switch kind {
             case .tool: item.payload = availableTools.first?.rawValue ?? ""
@@ -895,9 +903,56 @@ private struct RadialItemEditor: View {
                 Button(chooseTitle) { choose(applications: false) }
             }
         case .url:
-            // Sealed fork: the "Fetch Website Icon" download is removed; URL
-            // items keep the generic symbol (or any icon chosen below).
-            TextField(text.kindURL, text: $item.payload, prompt: Text(text.urlPlaceholder))
+            VStack(alignment: .leading, spacing: 6) {
+                TextField(text.kindURL, text: $item.payload, prompt: Text(text.urlPlaceholder))
+                    .onChange(of: item.payload) { _, _ in
+                        faviconStatus = nil
+                    }
+
+                // Sealed fork: the one click that contacts the typed host,
+                // through SealedURLSession's per-call allowance.
+                HStack(spacing: 8) {
+                    Button {
+                        fetchWebsiteFavicon()
+                    } label: {
+                        if isFetchingFavicon {
+                            HStack(spacing: 4) {
+                                ProgressView()
+                                    .controlSize(.small)
+                                Text(text.fetchFaviconLoading)
+                            }
+                        } else {
+                            Text(text.fetchFaviconButton)
+                        }
+                    }
+                    .disabled(isFetchingFavicon || item.payload.trimmingCharacters(in: .whitespaces).isEmpty || urlIsInvalid)
+
+                    if let faviconStatus {
+                        switch faviconStatus {
+                        case .success:
+                            HStack(spacing: 4) {
+                                Image(systemName: "checkmark.circle.fill")
+                                    .foregroundStyle(.green)
+                                Text(text.fetchFaviconSuccess)
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
+                        case .error:
+                            HStack(spacing: 4) {
+                                Image(systemName: "exclamationmark.triangle.fill")
+                                    .foregroundStyle(.orange)
+                                Text(text.fetchFaviconError)
+                                    .font(.caption)
+                                    .foregroundStyle(.orange)
+                            }
+                        }
+                    }
+                }
+
+                Text(text.fetchFaviconDisclaimer)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
         case .shortcut:
             LabeledContent(text.kindShortcut) {
                 ShortcutRecorderButton(shortcut: GlobalShortcut(storageValue: item.payload) ?? .radialMenuDefault,
@@ -978,6 +1033,25 @@ private struct RadialItemEditor: View {
         guard panel.runModal() == .OK, let url = panel.url else { return }
         RadialMenuIconStore.invalidate(item.payload)
         item.payload = url.path
+    }
+
+    private func fetchWebsiteFavicon() {
+        guard !item.payload.isEmpty, !urlIsInvalid else { return }
+        isFetchingFavicon = true
+        faviconStatus = nil
+
+        RadialMenuFaviconFetcher.fetchFavicon(for: item.payload) { result in
+            isFetchingFavicon = false
+            switch result {
+            case .success(let data):
+                item.customIconData = data
+                item.symbolName = ""
+                RadialMenuIconStore.invalidate(item: item)
+                faviconStatus = .success
+            case .failure:
+                faviconStatus = .error
+            }
+        }
     }
 }
 
