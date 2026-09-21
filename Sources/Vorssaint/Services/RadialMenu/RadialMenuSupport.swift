@@ -663,7 +663,7 @@ enum RadialMenuSupport {
                 item.payload = normalized
             }
             if let customData = item.customIconData {
-                if customData.count > RadialMenuFaviconFetcher.maxStoredIconBytes || NSImage(data: customData) == nil {
+                if customData.count > RadialMenuCustomIconLimits.maxStoredIconBytes || NSImage(data: customData) == nil {
                     item.customIconData = nil
                 }
             }
@@ -781,7 +781,7 @@ enum RadialMenuSupport {
     /// the starter profile.
     ///
     /// Walks every item on every wheel and decodes each custom icon (up to
-    /// `RadialMenuFaviconFetcher.maxStoredIconBytes` of PNG apiece), so it
+    /// `RadialMenuCustomIconLimits.maxStoredIconBytes` of PNG apiece), so it
     /// belongs to settings and session start, never to an event-tap callback.
     /// A callback that only needs the summoner wants `claimedMouseButtons`.
     static func decodeProfiles(_ data: Data?, defaults: UserDefaults = .standard) -> [RadialMenuProfile] {
@@ -903,196 +903,9 @@ enum RadialMenuGeometry {
     }
 }
 
-/// On-demand fetcher for website favicons, executed exclusively when explicitly
-/// requested by the user in the Settings editor.
-enum RadialMenuFaviconFetcher {
+/// Sealed fork: the on-demand favicon download that lived here is removed.
+/// Only the storage bound for a custom (user-picked) icon remains.
+enum RadialMenuCustomIconLimits {
     /// Max allowable icon data storage: 64KB
     static let maxStoredIconBytes = 65536
-    /// A favicon should be tiny. Stop the transfer itself at this bound so a
-    /// hostile response cannot be buffered into unbounded memory first.
-    static let maxDownloadBytes = 2 * 1_024 * 1_024
-    static let maxSourceDimension = 4_096
-    static let maxSourcePixels = 16_777_216
-
-    /// Fetches the favicon for a URL string on-demand.
-    /// Runs on a background task, calls completion on main queue.
-    static func fetchFavicon(for rawURL: String, completion: @escaping (Result<Data, Error>) -> Void) {
-        guard let url = faviconURL(for: rawURL) else {
-            DispatchQueue.main.async {
-                completion(.failure(FaviconError.invalidURL))
-            }
-            return
-        }
-        FaviconDownload(url: url, byteLimit: maxDownloadBytes) { result in
-            DispatchQueue.main.async {
-                guard case let .success(data) = result,
-                      sourceDimensionsAreSafe(data),
-                      let image = NSImage(data: data),
-                      image.size.width > 0, image.size.height > 0,
-                      let pngData = scaledPNGData(from: image)
-                else {
-                    completion(.failure(FaviconError.notFound))
-                    return
-                }
-                completion(.success(pngData))
-            }
-        }.start()
-    }
-
-    static func faviconURL(for rawURL: String) -> URL? {
-        guard let normalized = RadialMenuSupport.normalizedURL(rawURL),
-              let url = URL(string: normalized),
-              let scheme = url.scheme?.lowercased(),
-              scheme == "http" || scheme == "https",
-              url.host?.isEmpty == false,
-              var components = URLComponents(url: url, resolvingAgainstBaseURL: false)
-        else { return nil }
-        components.user = nil
-        components.password = nil
-        components.path = "/favicon.ico"
-        components.query = nil
-        components.fragment = nil
-        return components.url
-    }
-
-    static func sourceDimensionsAreSafe(_ data: Data) -> Bool {
-        guard let source = CGImageSourceCreateWithData(data as CFData, nil),
-              let properties = CGImageSourceCopyPropertiesAtIndex(source, 0, nil)
-                as? [CFString: Any],
-              let width = (properties[kCGImagePropertyPixelWidth] as? NSNumber)?.intValue,
-              let height = (properties[kCGImagePropertyPixelHeight] as? NSNumber)?.intValue,
-              width > 0, height > 0,
-              width <= maxSourceDimension, height <= maxSourceDimension,
-              width <= maxSourcePixels / height
-        else { return false }
-        return true
-    }
-
-    static func scaledPNGData(from image: NSImage, targetSize: CGFloat = 64) -> Data? {
-        let size = NSSize(width: targetSize, height: targetSize)
-        let newImage = NSImage(size: size)
-        newImage.lockFocus()
-        NSGraphicsContext.current?.imageInterpolation = .high
-        image.draw(in: NSRect(origin: .zero, size: size),
-                   from: NSRect(origin: .zero, size: image.size),
-                   operation: .copy,
-                   fraction: 1.0)
-        newImage.unlockFocus()
-
-        guard let tiffData = newImage.tiffRepresentation,
-              let bitmap = NSBitmapImageRep(data: tiffData),
-              let png = bitmap.representation(using: .png, properties: [:]) else {
-            return nil
-        }
-        return png.count <= maxStoredIconBytes ? png : nil
-    }
-
-    enum FaviconError: Error {
-        case invalidURL
-        case notFound
-    }
-
-    private struct Origin: Equatable {
-        let scheme: String
-        let host: String
-        let port: Int
-
-        init?(_ url: URL) {
-            guard let scheme = url.scheme?.lowercased(),
-                  let host = url.host?.lowercased() else { return nil }
-            self.scheme = scheme
-            self.host = host
-            port = url.port ?? (scheme == "https" ? 443 : 80)
-        }
-    }
-
-    private final class FaviconDownload: NSObject, URLSessionDataDelegate {
-        private let url: URL
-        private let byteLimit: Int
-        private let completion: (Result<Data, Error>) -> Void
-        private let origin: Origin
-        private var session: URLSession?
-        private var data = Data()
-        private var finished = false
-
-        init(url: URL, byteLimit: Int, completion: @escaping (Result<Data, Error>) -> Void) {
-            self.url = url
-            self.byteLimit = byteLimit
-            self.completion = completion
-            origin = Origin(url)!
-        }
-
-        func start() {
-            var request = URLRequest(url: url,
-                                     cachePolicy: .reloadIgnoringLocalCacheData,
-                                     timeoutInterval: 5)
-            request.setValue("image/*", forHTTPHeaderField: "Accept")
-            let configuration = URLSessionConfiguration.ephemeral
-            configuration.timeoutIntervalForRequest = 5
-            configuration.timeoutIntervalForResource = 5
-            let session = URLSession(configuration: configuration,
-                                     delegate: self,
-                                     delegateQueue: nil)
-            self.session = session
-            session.dataTask(with: request).resume()
-        }
-
-        func urlSession(_ session: URLSession,
-                        dataTask: URLSessionDataTask,
-                        didReceive response: URLResponse,
-                        completionHandler: @escaping (URLSession.ResponseDisposition) -> Void) {
-            guard let http = response as? HTTPURLResponse,
-                  (200...299).contains(http.statusCode),
-                  response.expectedContentLength <= 0
-                    || response.expectedContentLength <= Int64(byteLimit)
-            else {
-                completionHandler(.cancel)
-                finish(.failure(FaviconError.notFound))
-                return
-            }
-            completionHandler(.allow)
-        }
-
-        func urlSession(_ session: URLSession,
-                        dataTask: URLSessionDataTask,
-                        didReceive chunk: Data) {
-            guard data.count + chunk.count <= byteLimit else {
-                dataTask.cancel()
-                finish(.failure(FaviconError.notFound))
-                return
-            }
-            data.append(chunk)
-        }
-
-        func urlSession(_ session: URLSession,
-                        task: URLSessionTask,
-                        willPerformHTTPRedirection newResponse: HTTPURLResponse,
-                        newRequest request: URLRequest,
-                        completionHandler: @escaping (URLRequest?) -> Void) {
-            guard let redirectURL = request.url,
-                  Origin(redirectURL) == origin else {
-                completionHandler(nil)
-                return
-            }
-            completionHandler(request)
-        }
-
-        func urlSession(_ session: URLSession,
-                        task: URLSessionTask,
-                        didCompleteWithError error: Error?) {
-            if let error {
-                finish(.failure(error))
-            } else {
-                finish(.success(data))
-            }
-        }
-
-        private func finish(_ result: Result<Data, Error>) {
-            guard !finished else { return }
-            finished = true
-            session?.finishTasksAndInvalidate()
-            session = nil
-            completion(result)
-        }
-    }
 }
