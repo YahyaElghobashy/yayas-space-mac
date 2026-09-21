@@ -3,7 +3,7 @@
 # Copyright (C) 2026 Vorssaint
 #
 # Sealed-fork guard. Every outbound request the app makes is a read-only
-# HTTPS GET through the wrapper in Sources/Vorssaint/Sealed/NetworkPolicy.swift
+# HTTPS GET through the wrapper in Sources/YayasSpace/Sealed/NetworkPolicy.swift
 # (SealedURLSession), which refuses any host outside NetworkPolicy.allowedHosts:
 #
 #   api.github.com                 update check        (Services/Update/UpdateService.swift)
@@ -25,13 +25,13 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
-WRAPPER="Sources/Vorssaint/Sealed/NetworkPolicy.swift"
+WRAPPER="Sources/YayasSpace/Sealed/NetworkPolicy.swift"
 # Files that may build a URLRequest / read an HTTPURLResponse — each must hand
 # the request to SealedURLSession (checked below).
 CALL_SITES=(
-    "Sources/Vorssaint/Services/Update/UpdateService.swift"
-    "Sources/Vorssaint/Services/AppUpdates/AppUpdatesService.swift"
-    "Sources/Vorssaint/Services/RadialMenu/RadialMenuSupport.swift"
+    "Sources/YayasSpace/Services/Update/UpdateService.swift"
+    "Sources/YayasSpace/Services/AppUpdates/AppUpdatesService.swift"
+    "Sources/YayasSpace/Services/RadialMenu/RadialMenuSupport.swift"
 )
 ALLOWED=("$WRAPPER" "${CALL_SITES[@]}")
 
@@ -90,7 +90,7 @@ fi
 # github.com (release page / About links) or one of the About/social links
 # that only open in the browser on a click.
 host_hits="$(grep -rhoE 'https?://[A-Za-z0-9.-]+' Sources --include='*.swift' | sort -u \
-    | grep -vE '^https://(api\.github\.com|itunes\.apple\.com|uclient-api\.itunes\.apple\.com|formulae\.brew\.sh|github\.com|vorssaint\.com|buymeacoffee\.com|discord\.gg|x\.com|example\.invalid)$' || true)"
+    | grep -vE '^https://(api\.github\.com|itunes\.apple\.com|uclient-api\.itunes\.apple\.com|formulae\.brew\.sh|github\.com|yayasspace\.com|buymeacoffee\.com|discord\.gg|x\.com|example\.invalid)$' || true)"
 if [[ -n "$host_hits" ]]; then
     echo "✗ unexpected remote host literal under Sources/:" >&2
     print -r -- "$host_hits" >&2
@@ -100,7 +100,7 @@ fi
 # Paths that were removed on purpose and must not come back with a rebase:
 # Homebrew analytics (popularity), publisher (Sparkle) feeds, the upload and
 # feedback endpoints, the in-app speed test.
-removed_hits="$(grep -rnE 'formulae\.brew\.sh/api/analytics|SUFeedURL|latest-mac\.yml|screenshots\.vorssaint\.com|speed\.cloudflare\.com|AppUpdateFeedLoader|AppUpdateFeedSupport' Sources \
+removed_hits="$(grep -rnE 'formulae\.brew\.sh/api/analytics|SUFeedURL|latest-mac\.yml|screenshots\.yayasspace\.com|speed\.cloudflare\.com|AppUpdateFeedLoader|AppUpdateFeedSupport' Sources \
     --include='*.swift' | grep -vE '^\s*[^:]+:[0-9]+:\s*//' || true)"
 if [[ -n "$removed_hits" ]]; then
     echo "✗ a removed network path is referenced again:" >&2
