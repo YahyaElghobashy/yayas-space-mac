@@ -18,6 +18,8 @@ if CommandLine.arguments.contains("--uninstall") {
     Uninstaller.runAndExit()
 }
 
+SuiteHandoff.handleLaunchArguments()
+
 let app = NSApplication.shared
 let delegate = AppDelegate()
 app.delegate = delegate

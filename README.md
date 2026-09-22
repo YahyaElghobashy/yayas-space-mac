@@ -25,11 +25,17 @@
   <img src="https://img.shields.io/badge/network-4%20read--only%20hosts-46216B" alt="Four read-only hosts">
 </p>
 
+<p align="center">
+  <a href="https://github.com/YahyaElghobashy/yayas-space-mac/releases/latest/download/Yayas-Space-macOS-arm64.zip">
+    <img src="https://img.shields.io/badge/⬇%20%20Download%20Yaya's%20Space-macOS%20Apple%20silicon-46216B?style=for-the-badge&labelColor=1E1A24" alt="Download Yaya's Space">
+  </a>
+</p>
+
 ## What Yaya's Space is
 
 Yaya's Space is Yahya Elghobashy's build of the Vorssaint menu-bar utility: one icon holding a volume mixer, a system monitor, window and Dock controls, keyboard and mouse tweaks, clipboard tools, screen capture, keep-awake and more. It is the upstream 3.3.5 code base, sealed so that every outbound request is a read-only HTTPS GET to a short list of hosts, then rebranded under its own name, icon, bundle id and update feed as the upstream [trademark policy](https://github.com/vorssaint/vorssaint-utils/blob/main/TRADEMARKS.md) asks of forks.
 
-It is built and used by one person, on one Mac, from source. There is no App Store listing, no Homebrew cask, no notarized download and no auto-install.
+It is built and used by one person, on one Mac, from source. There is no App Store listing, no Homebrew cask and nothing notarized: the download below is a plain build you approve yourself once, and nothing on this Mac installs or updates itself behind your back.
 
 Not affiliated with or endorsed by Vorssaint.
 
@@ -163,7 +169,11 @@ The rest bends the same way: panel sections reorder and hide, the compact layout
 
 ## Install
 
-There is no installer. Build it (below), then move `dist/Yaya's Space (Developer).app` wherever you like and open it. On first launch macOS will ask you to confirm an unsigned app: right click, Open, confirm.
+**[Download Yaya's Space](https://github.com/YahyaElghobashy/yayas-space-mac/releases/latest/download/Yayas-Space-macOS-arm64.zip)** (macOS 14+, Apple silicon), unzip it, drag `Yaya's Space.app` into Applications and open it.
+
+macOS refuses the first launch, because the build is signed by me and not by Apple. Open **System Settings → Privacy & Security**, scroll to the note about Yaya's Space, click **Open Anyway**, and open the app again. After that it behaves: every permission is requested only by the feature that needs it, and the fan helper is installed only if you switch fan control on.
+
+Building it yourself stays the primary path, and the one I use — see [Build it yourself](#build-it-yourself).
 
 To remove it completely, including its settings, login item, fan helper and permissions, run `Tools/uninstall.sh`.
 

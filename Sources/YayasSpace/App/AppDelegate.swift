@@ -171,7 +171,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSW
         let skipStartupWindows = startupOfPreviousRunDidNotFinish
         DispatchQueue.main.async { [weak self] in
             guard let self else { return }
-            if !defaults.bool(forKey: DefaultsKey.hasOnboarded) {
+            if !defaults.bool(forKey: DefaultsKey.hasOnboarded) || CommandLine.arguments.contains("--onboarding") {
                 guard !skipStartupWindows else { return }
                 self.showOnboarding(mode: .full)
             } else {
@@ -1813,6 +1813,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSW
     /// neither reappears on the next launch.
     private func markOnboardingComplete() {
         UserDefaults.standard.set(true, forKey: DefaultsKey.hasOnboarded)
+        SuiteHandoff.markDone()
         UserDefaults.standard.set(OnboardingInfo.currentFeatureSet, forKey: DefaultsKey.featuresOnboardingVersion)
         UserDefaults.standard.set(AppInfo.version, forKey: DefaultsKey.lastUpdateIntroVersion)
         markSupportUpdateIntroSeenIfCurrentUpdate()
