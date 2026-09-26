@@ -140,6 +140,34 @@ final class WindowGreenButtonService {
         openMenu(for: window, buttonFrame: appKitButton)
     }
 
+#if YAYASSPACE_DEVELOPMENT
+    /// Developer builds only: shows the menu for the current set beside a
+    /// given button frame, with nothing to act on, so its look can be
+    /// checked without Accessibility.
+    func previewMenu(beside buttonFrame: CGRect) {
+        closeMenu()
+        let set = WindowCommandStore.shared.commands(.horizontal)
+        let entries = WindowCommandMenuLayout.entries(of: set) { $0.showInGreenButtonMenu }
+        let items = entries.map { command in
+            WindowGreenButtonMenuItem(command: command,
+                                      title: WindowCommandStrings.displayName(of: command,
+                                                                              language: L10n.shared.language),
+                                      isEnabled: command.kind != .restore && command.kind != .previousDisplay
+                                          && command.kind != .nextDisplay)
+        }
+        let layout = WindowGreenButtonMenuLayout.sanitized(
+            UserDefaults.standard.string(forKey: DefaultsKey.windowLayoutGreenButtonLayout))
+        let screen = NSScreen.main
+        let controller = WindowGreenButtonMenuController(items: items, layout: layout,
+                                                         grid: WindowCommandSetKind.horizontal.grid,
+                                                         buttonFrame: buttonFrame,
+                                                         visibleFrame: screen?.visibleFrame ?? buttonFrame)
+        controller.onClose = { [weak self] in self?.menu = nil }
+        menu = controller
+        controller.show()
+    }
+#endif
+
     private func openMenu(for window: AXUIElement, buttonFrame: CGRect) {
         closeMenu()
         let context = WindowLayoutService.shared.menuContext(window: window)
@@ -359,6 +387,15 @@ private final class WindowGreenButtonMenuView: NSView {
     override var isFlipped: Bool { true }
     override var isOpaque: Bool { false }
 
+    /// Menus print the named keys as the caps on the keyboard.
+    static func compactText(_ shortcut: GlobalShortcut) -> String {
+        shortcut.displayString
+            .replacingOccurrences(of: "Return", with: "↩")
+            .replacingOccurrences(of: "Space", with: "␣")
+            .replacingOccurrences(of: "Tab", with: "⇥")
+            .replacingOccurrences(of: "Esc", with: "⎋")
+    }
+
     init(items: [WindowGreenButtonMenuItem], layout: WindowGreenButtonMenuLayout, grid: WindowGrid) {
         self.items = items
         self.layout = layout
@@ -482,7 +519,7 @@ private final class WindowGreenButtonMenuView: NSView {
                 var shortcutWidth: CGFloat = 0
                 if let shortcut = item.command.effectiveShortcut {
                     let text = NSAttributedString(
-                        string: shortcut.displayString,
+                        string: Self.compactText(shortcut),
                         attributes: [.font: shortcutFont,
                                      .foregroundColor: isHovered ? NSColor.white.withAlphaComponent(0.85)
                                          : NSColor.secondaryLabelColor.withAlphaComponent(item.isEnabled ? 1 : 0.5)])
@@ -504,10 +541,10 @@ private final class WindowGreenButtonMenuView: NSView {
             let caption: String
             if let hovered {
                 let item = items[hovered]
-                caption = [item.title, item.command.effectiveShortcut?.displayString]
+                caption = [item.title, item.command.effectiveShortcut.map(Self.compactText)]
                     .compactMap { $0 }.joined(separator: "   ")
             } else {
-                caption = ""
+                caption = WindowCommandStrings.localized(L10n.shared.language).statusItemTitle
             }
             let text = NSAttributedString(string: caption,
                                           attributes: [.font: NSFont.systemFont(ofSize: 11),

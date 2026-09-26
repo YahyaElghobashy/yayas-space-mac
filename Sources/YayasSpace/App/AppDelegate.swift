@@ -184,6 +184,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSW
                 self.presentUpdateIntros()
             }
         }
+#if YAYASSPACE_DEVELOPMENT
+        WindowLayoutPreviewHook.runIfRequested()
+#endif
     }
 
     /// Asking another app about its windows waits for that app to answer, and

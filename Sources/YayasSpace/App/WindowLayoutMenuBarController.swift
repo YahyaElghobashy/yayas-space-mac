@@ -47,6 +47,11 @@ final class WindowLayoutMenuBarController: NSObject, NSMenuDelegate {
         statusItem = item
     }
 
+    /// Opens the menu as a click would (the Developer build's preview hook).
+    func openMenu() {
+        statusItem?.button?.performClick(nil)
+    }
+
     private func remove() {
         guard let statusItem else { return }
         NSStatusBar.system.removeStatusItem(statusItem)
@@ -76,8 +81,10 @@ final class WindowLayoutMenuBarController: NSObject, NSMenuDelegate {
             item.representedObject = command.id
             item.image = WindowCommandGlyph.image(for: command.kind, grid: grid,
                                                   size: NSSize(width: 21, height: 14))
+            Self.keepImageVisible(item)
+            // Every row names its combination, whether or not the shortcuts
+            // are switched on yet: the menu doubles as their cheat sheet.
             if let shortcut = command.effectiveShortcut,
-               UserDefaults.standard.bool(forKey: DefaultsKey.windowLayoutShortcutsEnabled),
                let equivalent = Self.keyEquivalent(for: shortcut) {
                 item.keyEquivalent = equivalent
                 item.keyEquivalentModifierMask = Self.modifierMask(for: shortcut.modifiers)
@@ -157,6 +164,15 @@ final class WindowLayoutMenuBarController: NSObject, NSMenuDelegate {
 
     @objc private func quit() {
         NSApp.terminate(nil)
+    }
+
+    /// macOS 27 hides menu item images unless an item asks to keep them.
+    /// The glyphs are the point of these rows, so they ask. The property is
+    /// newer than the SDK this app builds against, so it is set by name and
+    /// only where the running system has it.
+    static func keepImageVisible(_ item: NSMenuItem) {
+        guard item.responds(to: NSSelectorFromString("setPreferredImageVisibility:")) else { return }
+        item.setValue(1, forKey: "preferredImageVisibility") // .visible
     }
 
     // MARK: Key equivalents

@@ -854,7 +854,12 @@ final class WindowLayoutService: ObservableObject {
         } else {
             resolved = nil
         }
-        let frontmost = NSWorkspace.shared.frontmostApplication
+        // Without a window of its own, the app in front is offered for the
+        // ignore list only when it is an ordinary app (not a system agent
+        // such as a password prompt).
+        let frontmost = NSWorkspace.shared.frontmostApplication.flatMap {
+            $0.activationPolicy == .regular ? $0 : nil
+        }
         let app = resolved.flatMap { NSRunningApplication(processIdentifier: $0.key.processID) }
             ?? (window == nil ? frontmost : nil)
         let screen = resolved.flatMap { bestScreen(for: $0.frame, screens: screens) } ?? NSScreen.main
