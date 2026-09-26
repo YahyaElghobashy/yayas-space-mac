@@ -13,6 +13,7 @@ enum WindowCommandTests {
         gridGeometry(expect)
         builtinGeometry(expect)
         setSelectionAndShortcuts(expect)
+        multiDisplay(expect)
         activationHitTesting(expect)
         availability(expect)
         menusAndPlacement(expect)
@@ -340,6 +341,46 @@ enum WindowCommandTests {
         let resolved = WindowCommandShortcuts.resolvingConflicts(in: clash, keeping: [clash[rightIndex].id])
         expect(resolved[rightIndex].shortcut != nil && resolved[leftIndex].shortcut == nil,
                "a chosen shortcut wins a clash and the other command gives it up")
+    }
+
+    // MARK: Multiple displays
+
+    private static func multiDisplay(_ expect: (Bool, String) -> Void) {
+        // A laptop in the middle, a landscape display to its left and a
+        // portrait one to its right.
+        let laptop = CGRect(x: 0, y: 0, width: 1440, height: 900)
+        let left = CGRect(x: -1920, y: 0, width: 1920, height: 1080)
+        let portrait = CGRect(x: 1440, y: -300, width: 1080, height: 1920)
+        let frames = [laptop, portrait, left]
+        expect(WindowLayoutGeometry.adjacentDisplayIndex(currentIndex: 0, frames: frames, movingForward: true) == 1
+                && WindowLayoutGeometry.adjacentDisplayIndex(currentIndex: 0, frames: frames, movingForward: false) == 2
+                && WindowLayoutGeometry.adjacentDisplayIndex(currentIndex: 1, frames: frames, movingForward: true) == 2
+                && WindowLayoutGeometry.adjacentDisplayIndex(currentIndex: 2, frames: frames, movingForward: false) == 1,
+               "next and previous display walk left to right across mixed displays and wrap")
+        expect(frames.map(WindowCommandSetKind.forDisplay) == [.horizontal, .vertical, .horizontal],
+               "each display picks its own set: the portrait one the vertical set")
+        let laptopVisible = CGRect(x: 0, y: 0, width: 1440, height: 875)
+        let portraitVisible = CGRect(x: 1440, y: -300, width: 1080, height: 1895)
+        let leftHalf = CGRect(x: 0, y: 0, width: 720, height: 875)
+        let moved = WindowLayoutGeometry.rectForDisplay(current: leftHalf,
+                                                        sourceVisibleFrame: laptopVisible,
+                                                        destinationVisibleFrame: portraitVisible)
+        expect(moved.minX == portraitVisible.minX && moved.width == 720 && portraitVisible.contains(moved),
+               "a window moved to the portrait display keeps its size and its left edge")
+        let wide = CGRect(x: 100, y: 100, width: 1300, height: 600)
+        let squeezed = WindowLayoutGeometry.rectForDisplay(current: wide,
+                                                           sourceVisibleFrame: laptopVisible,
+                                                           destinationVisibleFrame: portraitVisible)
+        expect(squeezed.width == 1080 && portraitVisible.contains(squeezed),
+               "a window wider than the portrait display shrinks to fit it")
+        var context = WindowCommandAvailability.Context(hasWindow: true, appIsIgnored: false, displayCount: 3,
+                                                        canRestore: false, currentFrame: nil, targetFrame: nil)
+        expect(WindowCommandAvailability.isEnabled(.nextDisplay, context: context)
+                && WindowCommandAvailability.isEnabled(.previousDisplay, context: context),
+               "display moves are offered with more than one display")
+        context.displayCount = 1
+        expect(!WindowCommandAvailability.isEnabled(.previousDisplay, context: context),
+               "and greyed with one")
     }
 
     // MARK: Activation hit-testing
