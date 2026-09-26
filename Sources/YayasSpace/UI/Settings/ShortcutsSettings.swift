@@ -10,6 +10,7 @@ struct ShortcutsSettings: View {
     @ObservedObject private var l10n = L10n.shared
     @ObservedObject private var features = FeatureRuntime.shared
     @ObservedObject private var superKey = SuperKeyService.shared
+    @ObservedObject private var windowCommands = WindowCommandStore.shared
     @AppStorage(DefaultsKey.keyboardBrightnessShortcutsEnabled) private var keyboardBrightnessShortcutsEnabled = false
     @State private var expandedFeatures: Set<AppFeature> = [.screenshot]
     @State private var showsAppShortcuts = false
@@ -112,7 +113,7 @@ struct ShortcutsSettings: View {
     @ViewBuilder
     private func featureRows(_ feature: AppFeature, in group: FeatureGroup) -> some View {
         let roles = availableRoles.filter { $0.feature == feature && $0.group == group }
-        let count = feature == .windowLayout ? WindowLayoutAction.shortcutActions.count : roles.count
+        let count = feature == .windowLayout ? windowCommandCount : roles.count
         if count > 1 {
             disclosureHeader(
                 title: featureTitle(feature, roles: roles),
@@ -122,16 +123,26 @@ struct ShortcutsSettings: View {
                 isExpanded: expansionBinding(for: feature))
             if expandedFeatures.contains(feature) {
                 if feature == .windowLayout {
-                    ForEach(WindowLayoutAction.shortcutActions) { action in
-                        CentralWindowLayoutShortcutRow(
-                            action: action,
-                            shortcutsEnabled: UserDefaults.standard.bool(
-                                forKey: DefaultsKey.windowLayoutShortcutsEnabled),
-                            showsSuperKeyAlternative: superKey.isRunning,
-                            superKeyModifiers: superKey.modifiers,
-                            text: text
-                        )
-                        .disclosureIndent()
+                    // Both command sets, as the Window Layout page's Commands
+                    // tab lists them; each row edits the same command.
+                    ForEach(WindowCommandSetKind.allCases) { kind in
+                        Text(windowSetTitle(kind))
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(.secondary)
+                            .disclosureIndent()
+                        ForEach(windowCommands.commands(kind).filter { !$0.isSeparator }) { command in
+                            CentralWindowCommandShortcutRow(
+                                command: command,
+                                kind: kind,
+                                shortcutsEnabled: UserDefaults.standard.bool(
+                                    forKey: DefaultsKey.windowLayoutShortcutsEnabled),
+                                showsSuperKeyAlternative: superKey.isRunning,
+                                superKeyModifiers: superKey.modifiers,
+                                superKeySource: superKey.source,
+                                text: text
+                            )
+                            .disclosureIndent()
+                        }
                     }
                 } else {
                     if feature == .brightness {
@@ -228,11 +239,22 @@ struct ShortcutsSettings: View {
                                           roles: [GlobalShortcutRole]) -> Bool {
         if feature == .windowLayout {
             return UserDefaults.standard.bool(forKey: DefaultsKey.windowLayoutShortcutsEnabled)
-                && WindowLayoutAction.shortcutActions.contains { $0.savedShortcut != nil }
+                && WindowCommandShortcuts.registrations(for: windowCommands.configuration).isEmpty == false
         }
         return roles.contains { role in
             role.requiredEnableKeys.allSatisfy { UserDefaults.standard.bool(forKey: $0) }
         }
+    }
+
+    private var windowCommandCount: Int {
+        WindowCommandSetKind.allCases.reduce(0) { total, kind in
+            total + windowCommands.commands(kind).filter { !$0.isSeparator }.count
+        }
+    }
+
+    private func windowSetTitle(_ kind: WindowCommandSetKind) -> String {
+        let strings = WindowCommandStrings.localized(l10n.language)
+        return kind == .horizontal ? strings.setHorizontal : strings.setVertical
     }
 
     private func groupTitle(_ group: FeatureGroup) -> String {
@@ -267,44 +289,23 @@ private struct KeyboardBrightnessShortcutToggle: View {
     }
 }
 
-private struct CentralWindowLayoutShortcutRow: View {
+private struct CentralWindowCommandShortcutRow: View {
     @ObservedObject private var l10n = L10n.shared
-    @ObservedObject private var superKey = SuperKeyService.shared
-    let action: WindowLayoutAction
+    let command: WindowCommand
+    let kind: WindowCommandSetKind
     let shortcutsEnabled: Bool
     let showsSuperKeyAlternative: Bool
     let superKeyModifiers: GlobalShortcutModifiers
+    let superKeySource: SuperKeySource
     let text: ShortcutSettingsStrings
-    @AppStorage private var rawValue: String
     @State private var errorText: String?
     @State private var isRecording = false
-
-    init(action: WindowLayoutAction,
-         shortcutsEnabled: Bool,
-         showsSuperKeyAlternative: Bool,
-         superKeyModifiers: GlobalShortcutModifiers,
-         text: ShortcutSettingsStrings) {
-        self.action = action
-        self.shortcutsEnabled = shortcutsEnabled
-        self.showsSuperKeyAlternative = showsSuperKeyAlternative
-        self.superKeyModifiers = superKeyModifiers
-        self.text = text
-        _rawValue = AppStorage(
-            wrappedValue: action.defaultShortcut?.storageValue
-                ?? WindowLayoutAction.clearedShortcutStorageValue,
-            action.shortcutKey
-        )
-    }
-
-    private var windowText: WindowLayoutFeatureStrings {
-        FeatureStrings.windowLayout(l10n.language)
-    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 5) {
             HStack(alignment: .top, spacing: 8) {
                 ShortcutRowLabel(
-                    title: action.title(windowText),
+                    title: WindowCommandStrings.displayName(of: command, language: l10n.language),
                     symbolName: AppFeature.windowLayout.symbolName,
                     contextLabel: nil,
                     statusText: isActive ? text.active : text.inactive,
@@ -314,10 +315,10 @@ private struct CentralWindowLayoutShortcutRow: View {
                 VStack(alignment: .trailing, spacing: 4) {
                     HStack(spacing: 8) {
                         ShortcutRecorderButton(
-                            shortcut: shortcut ?? action.defaultShortcut ?? .windowLayoutLeftDefault,
+                            shortcut: command.shortcut ?? WindowCommandDefaults.maximize,
                             isEnabled: true,
                             waitingTitle: l10n.s.shortcutPressKeys,
-                            emptyTitle: shortcut == nil ? l10n.s.shortcutNone : nil,
+                            emptyTitle: command.shortcut == nil ? l10n.s.shortcutNone : nil,
                             clearAction: clear,
                             notCapturedAction: { errorText = l10n.s.shortcutNotCaptured },
                             recordingChanged: { recording in
@@ -325,7 +326,7 @@ private struct CentralWindowLayoutShortcutRow: View {
                                 if recording { errorText = nil }
                             },
                             invalidAction: { errorText = l10n.s.shortcutInvalid },
-                            captureAction: save
+                            captureAction: { errorText = WindowCommandShortcutEditing.save($0, for: command, in: kind) }
                         )
                         .frame(width: 108)
                         Button {
@@ -336,16 +337,15 @@ private struct CentralWindowLayoutShortcutRow: View {
                                 .foregroundStyle(.secondary)
                         }
                         .buttonStyle(.plain)
-                        .disabled(shortcut == nil)
+                        .disabled(command.shortcut == nil)
                         .help(l10n.s.shortcutClear)
                         .accessibilityLabel(l10n.s.shortcutClear)
-                        Button(l10n.s.shortcutReset) {
-                            rawValue = action.defaultShortcut?.storageValue
-                                ?? WindowLayoutAction.clearedShortcutStorageValue
-                            errorText = nil
-                            WindowLayoutService.shared.syncWithPreferences()
+                        if let fallback = defaultShortcut {
+                            Button(l10n.s.shortcutReset) {
+                                errorText = WindowCommandShortcutEditing.save(fallback, for: command, in: kind)
+                            }
+                            .disabled(command.effectiveShortcut == fallback)
                         }
-                        .disabled(shortcut == action.defaultShortcut)
                     }
                     if let alternative = superKeyAlternative {
                         Text(String(format: text.superKeyAlternativeFormat, alternative))
@@ -368,45 +368,23 @@ private struct CentralWindowLayoutShortcutRow: View {
         .onChange(of: l10n.language) { _, _ in errorText = nil }
     }
 
-    private var shortcut: GlobalShortcut? {
-        WindowLayoutAction.resolvedShortcut(storedValue: rawValue,
-                                            defaultShortcut: action.defaultShortcut)
+    private var defaultShortcut: GlobalShortcut? {
+        WindowCommandShortcutEditing.defaultShortcut(for: command, in: kind)
     }
 
     private var isActive: Bool {
-        shortcutsEnabled && shortcut != nil
+        shortcutsEnabled && command.effectiveShortcut != nil
     }
 
     private var superKeyAlternative: String? {
-        guard showsSuperKeyAlternative, let shortcut else { return nil }
+        guard showsSuperKeyAlternative, let shortcut = command.effectiveShortcut else { return nil }
         return shortcut.superKeyAlternative(
-            sourceLabel: FeatureStrings.superKey(l10n.language).sourceLabel(superKey.source),
+            sourceLabel: FeatureStrings.superKey(l10n.language).sourceLabel(superKeySource),
             superKeyModifiers: superKeyModifiers)
     }
 
     private func clear() {
-        rawValue = WindowLayoutAction.clearedShortcutStorageValue
         errorText = nil
-        WindowLayoutService.shared.syncWithPreferences()
-    }
-
-    private func save(_ shortcut: GlobalShortcut) {
-        if let conflict = GlobalShortcutRole.conflict(for: shortcut,
-                                                      excluding: nil,
-                                                      includeInactive: true) {
-            errorText = String(format: l10n.s.shortcutConflictFormat, conflict.title(l10n.s))
-            return
-        }
-        if shortcut.conflictsWithSystemShortcut {
-            errorText = String(format: l10n.s.shortcutConflictFormat, "macOS")
-            return
-        }
-        if let conflict = WindowLayoutService.shared.shortcutConflictTitle(shortcut) {
-            errorText = String(format: l10n.s.shortcutConflictFormat, conflict)
-            return
-        }
-        rawValue = shortcut.storageValue
-        errorText = nil
-        WindowLayoutService.shared.syncWithPreferences()
+        WindowCommandShortcutEditing.set(nil, for: command, in: kind)
     }
 }

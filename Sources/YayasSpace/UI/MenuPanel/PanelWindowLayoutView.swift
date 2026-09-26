@@ -9,7 +9,6 @@ struct PanelWindowLayoutView: View {
     @ObservedObject private var service = WindowLayoutService.shared
     @AppStorage(DefaultsKey.windowLayoutShortcutsEnabled) private var shortcutsEnabled = true
     @AppStorage(DefaultsKey.windowEdgeSnapEnabled) private var edgeSnapEnabled = false
-    @AppStorage(DefaultsKey.windowEdgeSnapDisabledZones) private var edgeSnapDisabledZones = ""
     @AppStorage(DefaultsKey.windowGestureEnabled) private var gestureEnabled = false
     @AppStorage(DefaultsKey.windowGestureModifiers) private var gestureModifiers = WindowGestureSupport.defaultModifierStorageValue
     @AppStorage(DefaultsKey.windowLayoutHiddenActions) private var hiddenActionsRaw = ""
@@ -22,6 +21,10 @@ struct PanelWindowLayoutView: View {
         FeatureStrings.windowLayout(l10n.language)
     }
 
+    private var commandText: WindowCommandStrings {
+        .localized(l10n.language)
+    }
+
     private let columns = [
         GridItem(.flexible(), spacing: 7),
         GridItem(.flexible(), spacing: 7),
@@ -32,7 +35,12 @@ struct PanelWindowLayoutView: View {
             header
             intro
             actionGroup(title: text.halves, actions: [.leftHalf, .rightHalf, .topHalf, .bottomHalf, .centerHalf])
-            actionGroup(title: text.thirds, actions: [.leftThird, .centerThird, .rightThird, .leftTwoThirds, .rightTwoThirds])
+            actionGroup(title: text.thirds, actions: [
+                .leftThird, .centerThird, .rightThird, .leftTwoThirds, .centerTwoThirds, .rightTwoThirds,
+            ])
+            actionGroup(title: text.rows, actions: [
+                .topThird, .middleThird, .bottomThird, .topTwoThirds, .middleTwoThirds, .bottomTwoThirds,
+            ])
             actionGroup(title: text.sixths, actions: [
                 .topLeftSixth, .topCenterSixth, .topRightSixth,
                 .bottomLeftSixth, .bottomCenterSixth, .bottomRightSixth,
@@ -102,27 +110,29 @@ struct PanelWindowLayoutView: View {
 
     private var intro: some View {
         VStack(alignment: .leading, spacing: 6) {
-            Toggle(text.edgeSnapEnable, isOn: $edgeSnapEnabled)
+            Toggle(commandText.snapByDragging, isOn: $edgeSnapEnabled)
                 .toggleStyle(.checkbox)
                 .controlSize(.small)
                 .font(.system(size: 10.5, weight: .medium))
                 .onChange(of: edgeSnapEnabled) { _, _ in
                     WindowLayoutService.shared.syncWithPreferences()
                 }
-            Text(text.edgeSnapCaption)
+            Text(commandText.snapByDraggingCaption)
                 .font(.system(size: 9.5))
                 .foregroundStyle(.tertiary)
                 .fixedSize(horizontal: false, vertical: true)
-            if edgeSnapEnabled {
-                WindowEdgeSnapZonePicker(disabledZonesStorage: $edgeSnapDisabledZones,
-                                         text: text,
-                                         resetTitle: l10n.s.shortcutReset,
-                                         compact: true)
-                    .onChange(of: edgeSnapDisabledZones) { _, _ in
-                        WindowLayoutService.shared.syncWithPreferences()
-                    }
-                    .transition(.opacity.combined(with: .move(edge: .top)))
+            // Drag areas belong to each command now; they are edited in
+            // Settings, where there is room for the dot grid.
+            Button {
+                WindowLayoutSettingsTabs.shared.tab = .commands
+                SettingsRouter.shared.page = .windowLayout
+                appDelegate()?.openSettingsWindow()
+            } label: {
+                Label(commandText.tabCommands, systemImage: "slider.horizontal.3")
+                    .font(.system(size: 10, weight: .semibold))
             }
+            .buttonStyle(.bordered)
+            .controlSize(.mini)
             if systemTilingEnabled {
                 Label(text.edgeSnapSystemConflict, systemImage: "exclamationmark.triangle.fill")
                     .font(.system(size: 9.5))
