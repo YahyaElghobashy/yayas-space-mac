@@ -19,6 +19,9 @@ enum WindowLayoutCompanions {
         // out, and Settings is one click away.
         WindowLayoutMenuBarController.shared.sync(
             visible: available && defaults.bool(forKey: DefaultsKey.windowLayoutShowMenuBarItem))
+        // The sync folder follows the feature, not the permission: settings
+        // can travel even before Accessibility is granted.
+        WindowLayoutSyncController.shared.sync(active: available)
     }
 
     static func suspend() {
