@@ -1741,6 +1741,7 @@ final class WindowLayoutService: ObservableObject {
         }
         panel.setFrame(frame, display: true)
         if !panel.isVisible {
+            (panel.contentView as? WindowEdgeSnapPreviewView)?.updateAppearance()
             panel.alphaValue = 0
             panel.orderFrontRegardless()
         }
@@ -2768,19 +2769,36 @@ private struct WindowPointerGesture {
     var lastAppliedAt: TimeInterval
 }
 
+/// The drop preview: where the window will land. Its look follows the
+/// preview settings (a system material in light, dark or matching the
+/// system, or the accent tint) and its border width.
 private final class WindowEdgeSnapPreviewView: NSView {
+    private let material = NSVisualEffectView()
+
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
-        wantsLayer = true
-        updateAppearance()
-        setAccessibilityElement(false)
+        setUp()
     }
 
     required init?(coder: NSCoder) {
         super.init(coder: coder)
+        setUp()
+    }
+
+    private func setUp() {
         wantsLayer = true
-        updateAppearance()
+        material.material = .hudWindow
+        material.blendingMode = .behindWindow
+        material.state = .active
+        material.wantsLayer = true
+        material.layer?.cornerRadius = 14
+        material.layer?.cornerCurve = .continuous
+        material.layer?.masksToBounds = true
+        material.autoresizingMask = [.width, .height]
+        material.frame = bounds
+        addSubview(material)
         setAccessibilityElement(false)
+        updateAppearance()
     }
 
     override func viewDidChangeEffectiveAppearance() {
@@ -2788,14 +2806,37 @@ private final class WindowEdgeSnapPreviewView: NSView {
         updateAppearance()
     }
 
-    private func updateAppearance() {
+    /// Re-read on every show, so a changed setting applies to the next drag.
+    func updateAppearance() {
         guard let layer else { return }
-        let accent = NSColor.controlAccentColor
+        let defaults = UserDefaults.standard
+        let style = WindowLayoutPreviewStyle.sanitized(defaults.string(forKey: DefaultsKey.windowLayoutPreviewStyle))
+        let border = CGFloat(WindowLayoutPreviewStyle.sanitizedBorderWidth(
+            defaults.integer(forKey: DefaultsKey.windowLayoutPreviewBorderWidth)))
         layer.cornerRadius = 14
         layer.cornerCurve = .continuous
-        layer.backgroundColor = accent.withAlphaComponent(0.16).cgColor
-        layer.borderColor = accent.withAlphaComponent(0.88).cgColor
-        layer.borderWidth = 2
+        layer.borderWidth = border
+        switch style {
+        case .accent:
+            let accent = NSColor.controlAccentColor
+            material.isHidden = true
+            layer.backgroundColor = accent.withAlphaComponent(0.16).cgColor
+            layer.borderColor = accent.withAlphaComponent(0.88).cgColor
+        case .system, .light, .dark:
+            material.isHidden = false
+            let forced: NSAppearance? = style == .light ? NSAppearance(named: .aqua)
+                : style == .dark ? NSAppearance(named: .darkAqua) : nil
+            // Assigned only on a real change: setting an appearance calls
+            // back into viewDidChangeEffectiveAppearance.
+            if material.appearance?.name != forced?.name { material.appearance = forced }
+            if appearance?.name != forced?.name { appearance = forced }
+            layer.backgroundColor = NSColor.clear.cgColor
+            var borderColor = NSColor.white.withAlphaComponent(0.7).cgColor
+            (forced ?? effectiveAppearance).performAsCurrentDrawingAppearance {
+                borderColor = NSColor.labelColor.withAlphaComponent(0.55).cgColor
+            }
+            layer.borderColor = borderColor
+        }
     }
 }
 
