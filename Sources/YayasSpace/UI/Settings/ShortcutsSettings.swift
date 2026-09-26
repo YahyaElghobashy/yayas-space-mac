@@ -204,7 +204,7 @@ struct ShortcutsSettings: View {
             includeInactiveConflicts: true,
             additionalConflict: { shortcut in
                 guard AppFeature.windowLayout.isAvailable else { return nil }
-                return WindowLayoutService.shared.shortcutConflictTitle(shortcut, excluding: nil)
+                return WindowLayoutService.shared.shortcutConflictTitle(shortcut)
             },
             onChange: {
                 FeatureRuntime.shared.sync(role.availabilityFeatures)
@@ -401,8 +401,7 @@ private struct CentralWindowLayoutShortcutRow: View {
             errorText = String(format: l10n.s.shortcutConflictFormat, "macOS")
             return
         }
-        if let conflict = WindowLayoutService.shared.shortcutConflictTitle(shortcut,
-                                                                           excluding: action) {
+        if let conflict = WindowLayoutService.shared.shortcutConflictTitle(shortcut) {
             errorText = String(format: l10n.s.shortcutConflictFormat, conflict)
             return
         }

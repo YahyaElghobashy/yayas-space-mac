@@ -227,8 +227,8 @@ struct PanelWindowLayoutView: View {
                                     .font(.system(size: 10.5, weight: .semibold))
                                     .lineLimit(1)
                                     .minimumScaleFactor(0.82)
-                                if shortcutsEnabled, action.supportsShortcut,
-                                   let shortcut = action.savedShortcut {
+                                if shortcutsEnabled,
+                                   let shortcut = WindowCommandStore.shared.shortcut(for: action) {
                                     Text(shortcut.displayString)
                                         .font(.system(size: 9, weight: .medium, design: .rounded))
                                         .foregroundStyle(.secondary)

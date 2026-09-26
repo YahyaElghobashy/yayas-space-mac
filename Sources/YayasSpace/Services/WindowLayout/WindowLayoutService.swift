@@ -31,15 +31,23 @@ final class WindowLayoutService: ObservableObject {
     /// Bumped on every published result, so a late settle failure can tell
     /// whether it still owns the feedback slot.
     private var resultGeneration = 0
-    @Published private(set) var failedShortcutActions: Set<WindowLayoutAction> = []
+    /// Command shortcuts the system refused to register (another app holds
+    /// the combination).
+    @Published private(set) var failedShortcuts: Set<GlobalShortcut> = []
     @Published private(set) var directionalShortcutRegistrationFailed = false
     @Published private(set) var isGestureRunning = false
 
     private var frameHistory = WindowLayoutHistory()
     private var lastActions: [WindowLayoutWindowKey: WindowLayoutAction] = [:]
-    private var hotKeyRefs: [WindowLayoutAction: EventHotKeyRef] = [:]
+    private var hotKeyRefs: [Int: EventHotKeyRef] = [:]
     private var eventHandler: EventHandlerRef?
-    private var registeredShortcuts: [WindowLayoutAction: GlobalShortcut] = [:]
+    /// One registration per combination any command set uses; the slot is
+    /// the hotkey id, and which command runs is decided when it fires.
+    private var registeredShortcuts: [GlobalShortcut] = []
+    /// Windows a placement snapped, with the size they had before, so a
+    /// drag can give that size back.
+    private var snapRecords: [WindowLayoutWindowKey: WindowSnapRecord] = [:]
+    private var commandStoreObservation: AnyCancellable?
     private var directionalHotKeyRef: EventHotKeyRef?
     private var registeredDirectionalShortcut: GlobalShortcut?
     private var directionalSession: WindowDirectionalSession?
@@ -82,7 +90,15 @@ final class WindowLayoutService: ObservableObject {
 
     private init() {
         SessionActivity.shared.onChange { [weak self] _ in self?.syncWithPreferences() }
+        // Edited commands take effect at once: shortcuts re-register and the
+        // drag listener starts or stops with the drag areas.
+        commandStoreObservation = WindowCommandStore.shared.$configuration
+            .dropFirst()
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] _ in self?.syncWithPreferences() }
     }
+
+    private var commands: WindowCommandConfiguration { WindowCommandStore.shared.configuration }
 
     func syncWithPreferences() {
         let available = AppFeature.windowLayout.isAvailable
@@ -107,10 +123,18 @@ final class WindowLayoutService: ObservableObject {
 
         let wantsEdgeSnap = available
             && UserDefaults.standard.bool(forKey: DefaultsKey.windowEdgeSnapEnabled)
-            && !enabledEdgeSnapZones.isEmpty
+            && dragSnappingHasWork
             && !WindowEdgeSnapSupport.isSystemTilingEnabled
             && trusted
         wantsEdgeSnap ? startEdgeSnapTap() : stopEdgeSnapTap()
+        WindowLayoutCompanions.sync(available: available, trusted: trusted)
+    }
+
+    /// Dragging only needs a listener while some command has a live drag
+    /// area, or while snapped windows should get their size back.
+    private var dragSnappingHasWork: Bool {
+        commands.hasEnabledActivation
+            || UserDefaults.standard.bool(forKey: DefaultsKey.windowLayoutRestoreSizeOnDrag)
     }
 
     /// Stops every Window Layout input hook before Accessibility is revoked or
@@ -121,6 +145,7 @@ final class WindowLayoutService: ObservableObject {
         unregisterDirectionalHotkey()
         stopGestureTap()
         stopEdgeSnapTap()
+        WindowLayoutCompanions.suspend()
         for timer in settleTimers.values { timer.invalidate() }
         settleTimers.removeAll()
         let suspensions = assistiveModeSuspensions.values
@@ -131,17 +156,18 @@ final class WindowLayoutService: ObservableObject {
         for suspension in suspensions { suspension.resume() }
     }
 
+    /// The command that answers to a combination, for other features'
+    /// shortcut fields. Silent while window layout shortcuts are off, since
+    /// nothing is registered then.
     func shortcutConflictTitle(_ shortcut: GlobalShortcut) -> String? {
-        shortcutConflictTitle(shortcut, excluding: nil)
-    }
-
-    func shortcutConflictTitle(_ shortcut: GlobalShortcut, excluding excluded: WindowLayoutAction?) -> String? {
         guard AppFeature.windowLayout.isAvailable,
               UserDefaults.standard.bool(forKey: DefaultsKey.windowLayoutShortcutsEnabled) else { return nil }
-        let text = FeatureStrings.windowLayout(L10n.shared.language)
-        return WindowLayoutAction.shortcutActions.first {
-            $0 != excluded && $0.savedShortcut == shortcut
-        }?.title(text)
+        for kind in WindowCommandSetKind.allCases {
+            if let command = commands[kind].first(where: { $0.effectiveShortcut == shortcut }) {
+                return WindowCommandStrings.displayName(of: command, language: L10n.shared.language)
+            }
+        }
+        return nil
     }
 
     func directionalShortcutConflictTitle(_ shortcut: GlobalShortcut) -> String? {
@@ -159,6 +185,13 @@ final class WindowLayoutService: ObservableObject {
         guard let target = focusedTarget(for: action) else {
             return finish(.failure(.noWindow))
         }
+        return apply(action, to: target)
+    }
+
+    private func apply(_ action: WindowLayoutAction,
+                       to target: WindowLayoutTarget,
+                       dropVisibleFrame: NSRect? = nil,
+                       historyFrame: WindowLayoutFrame? = nil) -> WindowLayoutResult {
         pruneWindowState(keeping: target.key)
 
         if action == .restore {
@@ -168,6 +201,7 @@ final class WindowLayoutService: ObservableObject {
             }
             if setFrame(previous, on: target.window, windowKey: target.key) {
                 lastActions.removeValue(forKey: target.key)
+                snapRecords.removeValue(forKey: target.key)
                 return finish(.success(restored: true))
             }
             frameHistory.record(previous, for: target.key)
@@ -220,6 +254,7 @@ final class WindowLayoutService: ObservableObject {
                         targetRect: rect,
                         screenVisibleFrame: destination.visibleFrame,
                         action: action,
+                        anchor: .action(action),
                         on: target.window,
                         windowKey: target.key) {
                 lastActions[target.key] = action
@@ -228,13 +263,14 @@ final class WindowLayoutService: ObservableObject {
             frameHistory.discardLatest(for: target.key)
             return finish(.failure(.failed))
         }
-        if let crossing = WindowLayoutGeometry.displayCrossing(for: action,
+        if dropVisibleFrame == nil,
+           let crossing = WindowLayoutGeometry.displayCrossing(for: action,
                                                                previousAction: lastActions[target.key]),
            accepted(actual: target.frame,
                     targetRect: placement(for: action,
                                           current: target.frame,
                                           visibleFrame: screen.visibleFrame).rect,
-                    action: action),
+                    anchor: .action(action)),
            let destination = sidewaysScreen(to: screen,
                                             screens: screens,
                                             movingRight: crossing.movingRight) {
@@ -246,6 +282,14 @@ final class WindowLayoutService: ObservableObject {
             return applyPlacement(crossing.action,
                                   to: target,
                                   visibleFrame: destination.visibleFrame,
+                                  cyclesRepeatedAction: false)
+        }
+        if let dropVisibleFrame {
+            // A drop picks its display with the pointer, and never cycles.
+            return applyPlacement(action,
+                                  to: target,
+                                  visibleFrame: dropVisibleFrame,
+                                  historyFrame: historyFrame,
                                   cyclesRepeatedAction: false)
         }
         return applyPlacement(action,
@@ -287,9 +331,13 @@ final class WindowLayoutService: ObservableObject {
                     targetRect: placement.rect,
                     screenVisibleFrame: visibleFrame,
                     action: effectiveAction,
+                    anchor: .action(effectiveAction),
                     on: target.window,
                     windowKey: target.key) {
             lastActions[target.key] = effectiveAction
+            if effectiveAction != .center {
+                noteSnapped(target.key, placed: placement.frame, before: historyFrame ?? target.frame)
+            }
             return finish(.success(restored: false))
         }
         frameHistory.discardLatest(for: target.key)
@@ -297,6 +345,10 @@ final class WindowLayoutService: ObservableObject {
     }
 
     private func focusedTarget(for action: WindowLayoutAction) -> WindowLayoutTarget? {
+        focusedTarget(capability: action.targetCapability)
+    }
+
+    private func focusedTarget(capability: WindowLayoutTargetCapability) -> WindowLayoutTarget? {
         let ownBundleID = Bundle.main.bundleIdentifier
         let ownPID = ProcessInfo.processInfo.processIdentifier
         let ownKeyWindow = NSApp.keyWindow
@@ -334,7 +386,7 @@ final class WindowLayoutService: ObservableObject {
                    let target = target(from: window,
                                        app: app,
                                        onScreenWindowIDs: onScreenWindowIDs,
-                                       capability: action.targetCapability) {
+                                       capability: capability) {
                     return target
                 }
             }
@@ -342,7 +394,7 @@ final class WindowLayoutService: ObservableObject {
                let first = windows.compactMap({ target(from: $0,
                                                         app: app,
                                                         onScreenWindowIDs: onScreenWindowIDs,
-                                                        capability: action.targetCapability) }).first {
+                                                        capability: capability) }).first {
                 return first
             }
         }
@@ -398,6 +450,7 @@ final class WindowLayoutService: ObservableObject {
         activeWindows.insert(current)
         frameHistory.removeStaleWindows(keeping: activeWindows)
         lastActions = lastActions.filter { activeWindows.contains($0.key) }
+        snapRecords = snapRecords.filter { activeWindows.contains($0.key) }
     }
 
     private func activeWindowKeys() -> Set<WindowLayoutWindowKey>? {
@@ -443,14 +496,19 @@ final class WindowLayoutService: ObservableObject {
                  targetRect: appKitFrame(fromAX: frame),
                  screenVisibleFrame: appKitFrame(fromAX: frame),
                  action: .restore,
+                 anchor: .action(.restore),
                  on: window,
                  windowKey: windowKey)
     }
 
+    /// `action` is the built-in behind the placement, if any, for restore
+    /// bookkeeping; `anchor` decides how a window that cannot take the exact
+    /// size is pinned and how the settle check recognises the result.
     private func setFrame(_ frame: WindowLayoutFrame,
                           targetRect: NSRect,
                           screenVisibleFrame: NSRect,
-                          action: WindowLayoutAction,
+                          action: WindowLayoutAction?,
+                          anchor: WindowPlacementAnchor,
                           on window: AXUIElement,
                           windowKey: WindowLayoutWindowKey) -> Bool {
         let windowID = windowKey.windowID
@@ -459,7 +517,7 @@ final class WindowLayoutService: ObservableObject {
         assistiveModeSuspensions[windowID] = EnhancedUserInterfaceSuspension.suspend(forAppOf: window)
 
         let original = self.frame(of: window)
-        if attempt(frame, targetRect: targetRect, action: action, on: window) {
+        if attempt(frame, targetRect: targetRect, anchor: anchor, on: window) {
             assistiveModeSuspensions.removeValue(forKey: windowID)?.resume()
             return true
         }
@@ -474,6 +532,7 @@ final class WindowLayoutService: ObservableObject {
                                      targetRect: targetRect,
                                      screenVisibleFrame: screenVisibleFrame,
                                      action: action,
+                                     anchor: anchor,
                                      original: original,
                                      previousAction: lastActions[windowKey],
                                      windowKey: windowKey,
@@ -499,7 +558,7 @@ final class WindowLayoutService: ObservableObject {
         }
         if self.attempt(context.frame,
                         targetRect: context.targetRect,
-                        action: context.action,
+                        anchor: context.anchor,
                         on: context.window) {
             concludeSettle(context, success: true)
             return
@@ -508,7 +567,7 @@ final class WindowLayoutService: ObservableObject {
             scheduleSettle(context, attempt: 1)
             return
         }
-        if let original = context.original, shouldUseMaximizeFallback(for: context.action) {
+        if let original = context.original, WindowLayoutGeometry.usesMaximizeFallback(context.anchor) {
             // An ungapped scratch frame that coaxes a stubborn window into
             // resizing; the gapped target is re-applied right after.
             let currentRect = appKitFrame(fromAX: original)
@@ -518,7 +577,7 @@ final class WindowLayoutService: ObservableObject {
             applyFrame(maxFrame, on: context.window)
             if self.attempt(context.frame,
                             targetRect: context.targetRect,
-                            action: context.action,
+                            anchor: context.anchor,
                             on: context.window) {
                 concludeSettle(context, success: true)
                 return
@@ -530,7 +589,7 @@ final class WindowLayoutService: ObservableObject {
     private func verified(_ context: SettleContext) -> Bool {
         guard let actual = frame(of: context.window) else { return false }
         return actual.isClose(to: context.frame, tolerance: frameTolerance)
-            || accepted(actual: actual, targetRect: context.targetRect, action: context.action)
+            || accepted(actual: actual, targetRect: context.targetRect, anchor: context.anchor)
     }
 
     // The action already reported success while the window was settling, so a
@@ -565,35 +624,22 @@ final class WindowLayoutService: ObservableObject {
 
     private func attempt(_ frame: WindowLayoutFrame,
                          targetRect: NSRect,
-                         action: WindowLayoutAction,
+                         anchor: WindowPlacementAnchor,
                          on window: AXUIElement) -> Bool {
         let visibleFrame = bestScreen(for: frame)?.visibleFrame ?? targetRect
         for _ in 0..<3 {
             applyFrame(frame,
                        targetRect: targetRect,
                        visibleFrame: visibleFrame,
-                       action: action,
+                       anchor: anchor,
                        on: window)
             guard let actual = self.frame(of: window) else { continue }
             if actual.isClose(to: frame, tolerance: frameTolerance)
-                || accepted(actual: actual, targetRect: targetRect, action: action) {
+                || accepted(actual: actual, targetRect: targetRect, anchor: anchor) {
                 return true
             }
         }
         return false
-    }
-
-    private func shouldUseMaximizeFallback(for action: WindowLayoutAction) -> Bool {
-        switch action {
-        case .leftHalf, .rightHalf, .topHalf, .bottomHalf, .centerHalf,
-                .leftThird, .centerThird, .rightThird, .leftTwoThirds, .rightTwoThirds,
-                .topLeftSixth, .topCenterSixth, .topRightSixth,
-                .bottomLeftSixth, .bottomCenterSixth, .bottomRightSixth,
-                .topLeft, .topRight, .bottomLeft, .bottomRight, .marginMaximize:
-            return true
-        default:
-            return false
-        }
     }
 
     private func applyFrame(_ frame: WindowLayoutFrame, on window: AXUIElement) {
@@ -606,9 +652,9 @@ final class WindowLayoutService: ObservableObject {
     private func applyFrame(_ frame: WindowLayoutFrame,
                             targetRect: NSRect,
                             visibleFrame: NSRect,
-                            action: WindowLayoutAction,
+                            anchor: WindowPlacementAnchor,
                             on window: AXUIElement) {
-        let requestedRect = WindowLayoutGeometry.anchoredRect(for: action,
+        let requestedRect = WindowLayoutGeometry.anchoredRect(for: anchor,
                                                               targetRect: targetRect,
                                                               actualSize: frame.size,
                                                               visibleFrame: visibleFrame)
@@ -616,7 +662,7 @@ final class WindowLayoutService: ObservableObject {
         _ = setPosition(requestedFrame.origin, on: window)
         _ = setSize(frame.size, on: window)
         let acceptedSize = self.frame(of: window)?.size ?? frame.size
-        let anchoredRect = WindowLayoutGeometry.anchoredRect(for: action,
+        let anchoredRect = WindowLayoutGeometry.anchoredRect(for: anchor,
                                                             targetRect: targetRect,
                                                             actualSize: acceptedSize,
                                                             visibleFrame: visibleFrame)
@@ -624,7 +670,7 @@ final class WindowLayoutService: ObservableObject {
         _ = setPosition(anchoredFrame.origin, on: window)
         _ = setSize(frame.size, on: window)
         let finalSize = self.frame(of: window)?.size ?? acceptedSize
-        let finalRect = WindowLayoutGeometry.anchoredRect(for: action,
+        let finalRect = WindowLayoutGeometry.anchoredRect(for: anchor,
                                                          targetRect: targetRect,
                                                          actualSize: finalSize,
                                                          visibleFrame: visibleFrame)
@@ -633,31 +679,248 @@ final class WindowLayoutService: ObservableObject {
 
     private func accepted(actual: WindowLayoutFrame,
                           targetRect: NSRect,
-                          action: WindowLayoutAction) -> Bool {
+                          anchor: WindowPlacementAnchor) -> Bool {
         let actualRect = appKitFrame(fromAX: actual)
         return WindowLayoutGeometry.accepts(actualRect: actualRect,
                                             targetRect: targetRect,
-                                            action: action,
+                                            anchor: anchor,
                                             anchorTolerance: anchorTolerance)
+    }
+
+    // MARK: - Commands
+
+    /// The built-in behaviour behind a command, when it has one: a fixed kind,
+    /// or an area that still has its built-in's exact rectangle. Those run the
+    /// built-in path with everything it does (a repeated side crossing to the
+    /// next display, Top twice maximizing). An edited or custom area is a
+    /// plain grid placement.
+    func placementAction(for command: WindowCommand, grid: WindowGrid) -> WindowLayoutAction? {
+        if let fixed = command.kind.fixedAction { return fixed }
+        if WindowCommandDefaults.isCanonical(command, in: grid) { return command.builtinID }
+        return nil
+    }
+
+    /// A command shortcut fired. The set is the one of the display the front
+    /// window is on; a combination only the other set uses does nothing.
+    fileprivate func runShortcut(slot: Int) {
+        guard registeredShortcuts.indices.contains(slot) else { return }
+        let shortcut = registeredShortcuts[slot]
+        let kind = focusedSetKind()
+        guard let command = WindowCommandShortcuts.command(for: shortcut, in: commands, setKind: kind) else {
+            return
+        }
+        apply(command, setKind: kind)
+    }
+
+    /// The set for the window in front: vertical when it sits on a portrait
+    /// display. Without a window, the display with the menu bar decides.
+    func focusedSetKind() -> WindowCommandSetKind {
+        if let target = focusedTarget(capability: .position),
+           let screen = bestScreen(for: target.frame) {
+            return .forDisplay(screen.frame)
+        }
+        return .forDisplay(NSScreen.main?.frame ?? .zero)
+    }
+
+    /// Applies a command to the window in front, or to one given window (the
+    /// green-button menu's). Ignored apps are left alone without a message.
+    @discardableResult
+    func apply(_ command: WindowCommand,
+               setKind: WindowCommandSetKind,
+               window: AXUIElement? = nil) -> WindowLayoutResult {
+        guard !command.isSeparator else { return .failure(.failed) }
+        guard AXIsProcessTrusted() else { return finish(.failure(.missingAccessibility)) }
+        let capability = placementAction(for: command, grid: setKind.grid)?.targetCapability ?? .frame
+        let target: WindowLayoutTarget?
+        if let window {
+            target = self.target(forWindow: window, capability: capability)
+        } else {
+            target = focusedTarget(capability: capability)
+        }
+        guard let target else { return finish(.failure(.noWindow)) }
+        guard !isIgnored(processID: target.key.processID) else { return .failure(.noWindow) }
+        return apply(command, setKind: setKind, to: target, dropVisibleFrame: nil, historyFrame: nil)
+    }
+
+    private func apply(_ command: WindowCommand,
+                       setKind: WindowCommandSetKind,
+                       to target: WindowLayoutTarget,
+                       dropVisibleFrame: NSRect?,
+                       historyFrame: WindowLayoutFrame?) -> WindowLayoutResult {
+        if let action = placementAction(for: command, grid: setKind.grid) {
+            return apply(action, to: target, dropVisibleFrame: dropVisibleFrame, historyFrame: historyFrame)
+        }
+        guard case .area(let rect) = command.kind else { return finish(.failure(.failed)) }
+        return applyArea(rect, grid: setKind.grid, to: target,
+                         visibleFrame: dropVisibleFrame, historyFrame: historyFrame)
+    }
+
+    /// A grid area of a custom (or edited) command: the rectangle inside the
+    /// margins, pinned to the screen edges it touches.
+    private func applyArea(_ rect: GridRect,
+                           grid: WindowGrid,
+                           to target: WindowLayoutTarget,
+                           visibleFrame: NSRect?,
+                           historyFrame: WindowLayoutFrame?) -> WindowLayoutResult {
+        pruneWindowState(keeping: target.key)
+        guard let visible = visibleFrame ?? bestScreen(for: target.frame)?.visibleFrame else {
+            return finish(.failure(.failed))
+        }
+        let targetRect = WindowCommandGeometry.frame(for: rect,
+                                                     grid: grid,
+                                                     visibleFrame: visible,
+                                                     windowGap: WindowLayoutGaps.windowGap,
+                                                     screenGap: WindowLayoutGaps.screenGap).integral
+        let frame = axFrame(fromAppKit: targetRect)
+        // An area never takes part in the "same side twice" rules.
+        lastActions.removeValue(forKey: target.key)
+        if frame == target.frame { return finish(.success(restored: false)) }
+        let before = historyFrame ?? target.frame
+        frameHistory.record(before, for: target.key)
+        if setFrame(frame,
+                    targetRect: targetRect,
+                    screenVisibleFrame: visible,
+                    action: nil,
+                    anchor: .edges(WindowCommandGeometry.edgeContact(for: rect, grid: grid)),
+                    on: target.window,
+                    windowKey: target.key) {
+            noteSnapped(target.key, placed: frame, before: before)
+            return finish(.success(restored: false))
+        }
+        frameHistory.discardLatest(for: target.key)
+        return finish(.failure(.failed))
+    }
+
+    /// Remembers the size a window had before Window Layout first snapped
+    /// it. Snapping it again from one area straight to another keeps that
+    /// first size, so a drag away always goes back to the window's own size.
+    private func noteSnapped(_ key: WindowLayoutWindowKey,
+                             placed: WindowLayoutFrame,
+                             before: WindowLayoutFrame) {
+        let beforeRect = CGRect(origin: before.origin, size: before.size)
+        if let existing = snapRecords[key],
+           WindowRestoreOnDrag.isStillSnapped(current: beforeRect,
+                                              placed: CGRect(origin: existing.placed.origin,
+                                                             size: existing.placed.size),
+                                              tolerance: 24) {
+            snapRecords[key] = WindowSnapRecord(placed: placed, originalSize: existing.originalSize)
+        } else {
+            snapRecords[key] = WindowSnapRecord(placed: placed, originalSize: before.size)
+        }
+    }
+
+    private func target(forWindow window: AXUIElement,
+                        capability: WindowLayoutTargetCapability) -> WindowLayoutTarget? {
+        var pid = pid_t(0)
+        guard AXUIElementGetPid(window, &pid) == .success,
+              let app = NSRunningApplication(processIdentifier: pid),
+              !app.isTerminated,
+              let onScreenWindowIDs = onScreenWindowIDs()
+        else { return nil }
+        AXUIElementSetMessagingTimeout(window, 0.35)
+        return target(from: window, app: app, onScreenWindowIDs: onScreenWindowIDs, capability: capability)
+    }
+
+    // MARK: Ignored apps
+
+    var ignoredBundleIDs: [String] {
+        WindowLayoutIgnoreList.sanitized(
+            UserDefaults.standard.stringArray(forKey: DefaultsKey.windowLayoutIgnoredApps) ?? [])
+    }
+
+    func isIgnored(bundleID: String?) -> Bool {
+        WindowLayoutIgnoreList.contains(bundleID, in: ignoredBundleIDs)
+    }
+
+    private func isIgnored(processID: pid_t) -> Bool {
+        isIgnored(bundleID: NSRunningApplication(processIdentifier: processID)?.bundleIdentifier)
+    }
+
+    func toggleIgnored(bundleID: String) {
+        UserDefaults.standard.set(WindowLayoutIgnoreList.toggled(bundleID, in: ignoredBundleIDs),
+                                  forKey: DefaultsKey.windowLayoutIgnoredApps)
+    }
+
+    // MARK: Menu state
+
+    /// What the menus need to know about the window a command would act on,
+    /// gathered once when a menu opens.
+    func menuContext(window: AXUIElement? = nil) -> WindowCommandMenuContext {
+        let screens = NSScreen.screens
+        let resolved: WindowLayoutTarget?
+        if AXIsProcessTrusted() {
+            resolved = window.flatMap { target(forWindow: $0, capability: .position) }
+                ?? (window == nil ? focusedTarget(capability: .position) : nil)
+        } else {
+            resolved = nil
+        }
+        let frontmost = NSWorkspace.shared.frontmostApplication
+        let app = resolved.flatMap { NSRunningApplication(processIdentifier: $0.key.processID) }
+            ?? (window == nil ? frontmost : nil)
+        let screen = resolved.flatMap { bestScreen(for: $0.frame, screens: screens) } ?? NSScreen.main
+        let kind = WindowCommandSetKind.forDisplay(screen?.frame ?? .zero)
+        var canRestore = false
+        if let resolved {
+            canRestore = frameHistory.peekPrevious(for: resolved.key, current: resolved.frame) != nil
+        }
+        let isOwnApp = app?.processIdentifier == ProcessInfo.processInfo.processIdentifier
+        return WindowCommandMenuContext(setKind: kind,
+                                        appName: isOwnApp ? nil : app?.localizedName,
+                                        bundleID: isOwnApp ? nil : app?.bundleIdentifier,
+                                        isIgnored: isIgnored(bundleID: app?.bundleIdentifier),
+                                        displayCount: screens.count,
+                                        canRestore: canRestore,
+                                        target: resolved,
+                                        screenFrame: screen?.frame,
+                                        visibleFrame: screen?.visibleFrame)
+    }
+
+    /// Whether a command would change the window, for greyed menu items.
+    func isAvailable(_ command: WindowCommand, in context: WindowCommandMenuContext) -> Bool {
+        var current: CGRect?
+        var targetFrame: CGRect?
+        if let target = context.target, let screenFrame = context.screenFrame,
+           let visibleFrame = context.visibleFrame {
+            let rect = appKitFrame(fromAX: target.frame)
+            current = rect
+            switch command.kind {
+            case .area, .maximize, .marginMaximize, .center:
+                targetFrame = previewFrame(for: command, setKind: context.setKind, current: rect,
+                                           key: target.key, screenFrame: screenFrame,
+                                           visibleFrame: visibleFrame)
+            default:
+                break
+            }
+        }
+        let availability = WindowCommandAvailability.Context(hasWindow: context.target != nil,
+                                                             appIsIgnored: context.isIgnored,
+                                                             displayCount: context.displayCount,
+                                                             canRestore: context.canRestore,
+                                                             currentFrame: current,
+                                                             targetFrame: targetFrame)
+        return WindowCommandAvailability.isEnabled(command.kind, context: availability)
     }
 
     // MARK: - Shortcuts
 
+    /// Hotkey ids of command shortcuts start here, clear of the ids the
+    /// earlier per-action registration used.
+    private static let commandHotKeyBase: UInt32 = 1_000
+
     private func registerHotkeys() {
-        // Cleared shortcuts are simply absent: their key combo stays free for
-        // other apps, which is the whole point of clearing them (issue #169).
-        let shortcuts = Dictionary(uniqueKeysWithValues: WindowLayoutAction.shortcutActions.compactMap { action in
-            action.savedShortcut.map { (action, $0) }
-        })
+        // Switched-off and cleared shortcuts are simply absent: their key
+        // combo stays free for other apps (issue #169). Both sets share one
+        // registration per combination.
+        let shortcuts = WindowCommandShortcuts.registrations(for: commands)
         if !hotKeyRefs.isEmpty, shortcuts == registeredShortcuts { return }
         unregisterHotkeys()
 
         ensureHotKeyEventHandler()
 
-        var failures = Set<WindowLayoutAction>()
-        for action in WindowLayoutAction.shortcutActions {
-            guard let shortcut = shortcuts[action] else { continue }
-            let id = EventHotKeyID(signature: 0x5655_574C, id: action.shortcutID) // 'VUWL'
+        var failures = Set<GlobalShortcut>()
+        for (slot, shortcut) in shortcuts.enumerated() {
+            let id = EventHotKeyID(signature: 0x5655_574C, // 'VUWL'
+                                   id: Self.commandHotKeyBase + UInt32(slot))
             var ref: EventHotKeyRef?
             let status = RegisterEventHotKey(shortcut.carbonKeyCode,
                                              shortcut.carbonModifiers,
@@ -666,13 +929,13 @@ final class WindowLayoutService: ObservableObject {
                                              0,
                                              &ref)
             if status == noErr, let ref {
-                hotKeyRefs[action] = ref
+                hotKeyRefs[slot] = ref
             } else {
-                failures.insert(action)
+                failures.insert(shortcut)
             }
         }
         registeredShortcuts = shortcuts
-        failedShortcutActions = failures
+        failedShortcuts = failures
     }
 
     private func ensureHotKeyEventHandler() {
@@ -701,10 +964,11 @@ final class WindowLayoutService: ObservableObject {
                 }
                 guard id.signature == 0x5655_574C,
                       kind == UInt32(kEventHotKeyPressed),
-                      let action = WindowLayoutAction(shortcutID: id.id) else {
+                      id.id >= WindowLayoutService.commandHotKeyBase else {
                     return OSStatus(eventNotHandledErr)
                 }
-                DispatchQueue.main.async { service.apply(action) }
+                let slot = Int(id.id - WindowLayoutService.commandHotKeyBase)
+                DispatchQueue.main.async { service.runShortcut(slot: slot) }
                 return noErr
             }, specs.count, &specs, Unmanaged.passUnretained(self).toOpaque(), &eventHandler)
         }
@@ -722,7 +986,7 @@ final class WindowLayoutService: ObservableObject {
         }
         hotKeyRefs.removeAll()
         registeredShortcuts.removeAll()
-        failedShortcutActions.removeAll()
+        failedShortcuts.removeAll()
     }
 
     private func registerDirectionalHotkey() {
@@ -1034,6 +1298,7 @@ final class WindowLayoutService: ObservableObject {
         edgeSnapResolveAttempts = 0
         edgeSnapDrag = nil
         hideEdgeSnapPreview(immediately: true)
+        WindowLayoutOverlays.shared.endDrag()
         if let edgeSnapRunLoopSource {
             CFRunLoopRemoveSource(CFRunLoopGetMain(), edgeSnapRunLoopSource, .commonModes)
         }
@@ -1101,7 +1366,7 @@ final class WindowLayoutService: ObservableObject {
             edgeSnapSequenceSuppressed = false
             guard AppFeature.windowLayout.isAvailable,
                   UserDefaults.standard.bool(forKey: DefaultsKey.windowEdgeSnapEnabled),
-                  !enabledEdgeSnapZones.isEmpty,
+                  dragSnappingHasWork,
                   !WindowEdgeSnapSupport.isSystemTilingEnabled,
                   AXIsProcessTrusted(),
                   !edgeSnapConflictsWithWindowGesture(flags: flags)
@@ -1109,9 +1374,11 @@ final class WindowLayoutService: ObservableObject {
                 edgeSnapSequenceSuppressed = true
                 return
             }
+            let ignored = ignoredBundleIDs
             guard let candidate = WindowServerWindowHitTest.candidate(at: location, pidIsEligible: {
                 guard let app = NSRunningApplication(processIdentifier: $0) else { return false }
                 return !app.isTerminated && app.activationPolicy == .regular
+                    && !WindowLayoutIgnoreList.contains(app.bundleIdentifier, in: ignored)
             }),
             !WindowEdgeSnapSupport.startsAtResizeHandle(location, frame: candidate.frame)
             else {
@@ -1159,6 +1426,7 @@ final class WindowLayoutService: ObservableObject {
             edgeSnapResolveAttempts = 0
             edgeSnapDrag = nil
             hideEdgeSnapPreview(immediately: false)
+            WindowLayoutOverlays.shared.endDrag()
             let generation = edgeSnapSequenceGeneration
             guard let completed else {
                 guard let pressOrigin, let pressCandidate,
@@ -1203,7 +1471,7 @@ final class WindowLayoutService: ObservableObject {
                 pointerStart: drag.pointerStart,
                 pointerNow: releaseLocation
               ) == .moving,
-              let target = edgeSnapTarget(atQuartzPoint: releaseLocation)
+              let target = commandDragTarget(atQuartzPoint: releaseLocation, drag: drag)
         else { return }
         applyEdgeSnap(drag, target: target)
     }
@@ -1241,11 +1509,12 @@ final class WindowLayoutService: ObservableObject {
                                   pointerStart: pointerStart,
                                   protectsSystemTopEdge: WindowEdgeSnapSupport.isSystemTopWindowOverviewDragEnabled,
                                   quartzScreenFrames: edgeSnapQuartzScreenFrames(),
-                                  enabledZones: enabledEdgeSnapZones,
+                                  enabledZones: WindowActivationHitTest.coveredLegacyZones(commands),
                                   lastSampleAt: 0,
                                   mismatchCount: 0,
                                   isMoving: false,
-                                  target: nil)
+                                  target: nil,
+                                  restoredFrame: nil)
     }
 
     private func updateEdgeSnapDrag(at location: CGPoint, forceSample: Bool) {
@@ -1269,6 +1538,10 @@ final class WindowLayoutService: ObservableObject {
             case .moving:
                 drag.isMoving = true
                 drag.mismatchCount = 0
+                restoreSizeIfSnapped(&drag, pointer: location)
+                WindowLayoutOverlays.shared.beginDrag(screens: activationScreens(),
+                                                      commands: commands,
+                                                      settings: activationSettings)
             case .resizing:
                 cancelEdgeSnapTracking()
                 return
@@ -1283,11 +1556,12 @@ final class WindowLayoutService: ObservableObject {
             }
         }
 
-        let target = edgeSnapTarget(atQuartzPoint: location)
+        let target = commandDragTarget(atQuartzPoint: location, drag: drag)
         if target != drag.target {
             drag.target = target
+            WindowLayoutOverlays.shared.highlight(commandID: target?.commandID)
             if let target {
-                showEdgeSnapPreview(frame: target.frame)
+                showEdgeSnapPreview(frame: target.previewFrame)
             } else {
                 hideEdgeSnapPreview(immediately: false)
             }
@@ -1295,14 +1569,88 @@ final class WindowLayoutService: ObservableObject {
         edgeSnapDrag = drag
     }
 
-    private func edgeSnapTarget(atQuartzPoint point: CGPoint) -> WindowEdgeSnapTarget? {
+    // MARK: - Command drag areas
+
+    private var activationSettings: WindowActivationSettings {
+        let defaults = UserDefaults.standard
+        return WindowActivationSettings(
+            edgeWidth: CGFloat(WindowActivationSettings.sanitizedEdgeWidth(
+                defaults.integer(forKey: DefaultsKey.windowLayoutEdgeAreaWidth))),
+            interiorScale: CGFloat(WindowActivationSettings.sanitizedInteriorScale(
+                defaults.integer(forKey: DefaultsKey.windowLayoutInteriorAreaScale))) / 100)
+    }
+
+    private func activationScreens() -> [WindowActivationScreen] {
+        NSScreen.screens.map { WindowActivationScreen(frame: $0.frame, visibleFrame: $0.visibleFrame) }
+    }
+
+    /// The command a dragged window would take if released here, with the
+    /// frame it would get. Nil outside every live drag area.
+    private func commandDragTarget(atQuartzPoint point: CGPoint,
+                                   drag: WindowEdgeSnapDrag) -> WindowCommandDragTarget? {
         let appKitPoint = CGPoint(x: point.x, y: menuBarScreenTopY - point.y)
-        let screens = NSScreen.screens.map {
-            WindowEdgeSnapScreen(frame: $0.frame, visibleFrame: $0.visibleFrame)
+        let screens = activationScreens()
+        let configuration = commands
+        guard let match = WindowActivationHitTest.match(at: appKitPoint,
+                                                        screens: screens,
+                                                        commands: { configuration[$0] },
+                                                        settings: activationSettings),
+              let found = configuration.command(id: match.commandID),
+              screens.indices.contains(match.screenIndex)
+        else { return nil }
+        let screen = screens[match.screenIndex]
+        let current = frame(of: drag.window).map { appKitFrame(fromAX: $0) }
+            ?? appKitFrame(fromAX: WindowLayoutFrame(origin: drag.initialFrame.origin,
+                                                     size: drag.initialFrame.size))
+        guard let preview = previewFrame(for: found.command,
+                                         setKind: found.kind,
+                                         current: current,
+                                         key: drag.key,
+                                         screenFrame: screen.frame,
+                                         visibleFrame: screen.visibleFrame)
+        else { return nil }
+        return WindowCommandDragTarget(commandID: found.command.id,
+                                       setKind: found.kind,
+                                       previewFrame: preview.integral,
+                                       visibleFrame: screen.visibleFrame)
+    }
+
+    /// Where a command would put a window, in AppKit coordinates: the drag
+    /// preview, and the "nothing would change" check of the menus.
+    private func previewFrame(for command: WindowCommand,
+                              setKind: WindowCommandSetKind,
+                              current: NSRect,
+                              key: WindowLayoutWindowKey?,
+                              screenFrame: NSRect,
+                              visibleFrame: NSRect) -> NSRect? {
+        let windowGap = WindowLayoutGaps.windowGap
+        let screenGap = WindowLayoutGaps.screenGap
+        if let builtin = placementAction(for: command, grid: setKind.grid) {
+            switch builtin {
+            case .restore:
+                guard let key,
+                      let previous = frameHistory.peekPrevious(for: key, current: axFrame(fromAppKit: current))
+                else { return nil }
+                return appKitFrame(fromAX: previous)
+            case .fullScreen:
+                return screenFrame
+            case .nextDisplay, .previousDisplay:
+                let screens = NSScreen.screens
+                guard let source = screens.first(where: { $0.frame == screenFrame }),
+                      let destination = adjacentScreen(to: source, screens: screens,
+                                                       movingForward: builtin == .nextDisplay)
+                else { return nil }
+                return WindowLayoutGeometry.rectForDisplay(current: current,
+                                                           sourceVisibleFrame: visibleFrame,
+                                                           destinationVisibleFrame: destination.visibleFrame)
+            default:
+                return WindowLayoutGeometry.rect(for: builtin, current: current, visibleFrame: visibleFrame,
+                                                 windowGap: windowGap, screenGap: screenGap)
+            }
         }
-        return WindowEdgeSnapSupport.target(at: appKitPoint,
-                                            screens: screens,
-                                            enabledZones: enabledEdgeSnapZones)
+        guard case .area(let rect) = command.kind else { return nil }
+        return WindowCommandGeometry.frame(for: rect, grid: setKind.grid, visibleFrame: visibleFrame,
+                                           windowGap: windowGap, screenGap: screenGap)
     }
 
     private func edgeSnapQuartzScreenFrames() -> [CGRect] {
@@ -1316,10 +1664,11 @@ final class WindowLayoutService: ObservableObject {
     }
 
     private func applyEdgeSnap(_ drag: WindowEdgeSnapDrag,
-                               target: WindowEdgeSnapTarget) {
+                               target: WindowCommandDragTarget) {
         guard AppFeature.windowLayout.isAvailable,
               UserDefaults.standard.bool(forKey: DefaultsKey.windowEdgeSnapEnabled),
-              enabledEdgeSnapZones.contains(target.zone),
+              let command = commands.command(id: target.commandID)?.command,
+              command.effectiveActivation != nil,
               !WindowEdgeSnapSupport.isSystemTilingEnabled,
               AXIsProcessTrusted(),
               canSetFrame(on: drag.window),
@@ -1333,14 +1682,41 @@ final class WindowLayoutService: ObservableObject {
         let layoutTarget = WindowLayoutTarget(window: drag.window,
                                               key: drag.key,
                                               frame: currentFrame)
-        pruneWindowState(keeping: drag.key)
-        let history = WindowLayoutFrame(origin: drag.initialFrame.origin,
-                                        size: drag.initialFrame.size)
-        _ = applyPlacement(target.action,
-                           to: layoutTarget,
-                           visibleFrame: target.visibleFrame,
-                           historyFrame: history,
-                           cyclesRepeatedAction: false)
+        // Restore goes back to where the window was before this drag; a
+        // window that got its earlier size back mid-drag starts from that.
+        let start = drag.restoredFrame ?? drag.initialFrame
+        let history = WindowLayoutFrame(origin: start.origin, size: start.size)
+        _ = apply(command,
+                  setKind: target.setKind,
+                  to: layoutTarget,
+                  dropVisibleFrame: target.visibleFrame,
+                  historyFrame: history)
+    }
+
+    /// Gives a window Window Layout snapped its earlier size back as soon as
+    /// a drag takes it out of its snapped frame, keeping the pointer on the
+    /// same spot of the title bar.
+    private func restoreSizeIfSnapped(_ drag: inout WindowEdgeSnapDrag, pointer: CGPoint) {
+        guard drag.restoredFrame == nil,
+              UserDefaults.standard.bool(forKey: DefaultsKey.windowLayoutRestoreSizeOnDrag),
+              let record = snapRecords[drag.key],
+              WindowRestoreOnDrag.isStillSnapped(current: drag.initialFrame,
+                                                 placed: CGRect(origin: record.placed.origin,
+                                                                size: record.placed.size),
+                                                 tolerance: 24),
+              abs(record.originalSize.width - drag.initialFrame.width) > 1
+                || abs(record.originalSize.height - drag.initialFrame.height) > 1
+        else { return }
+        let restored = WindowRestoreOnDrag.restoredFrame(snapped: drag.initialFrame,
+                                                         originalSize: record.originalSize,
+                                                         pointerStart: drag.pointerStart,
+                                                         pointerNow: pointer)
+        // Size first: shrinking at the old origin keeps the whole window on
+        // screen for the one frame before the position follows.
+        _ = setSize(restored.size, on: drag.window)
+        _ = setPosition(restored.origin, on: drag.window)
+        drag.restoredFrame = restored
+        snapRecords.removeValue(forKey: drag.key)
     }
 
     private func cancelEdgeSnapTracking() {
@@ -1351,12 +1727,7 @@ final class WindowLayoutService: ObservableObject {
         edgeSnapResolveAttempts = 0
         edgeSnapDrag = nil
         hideEdgeSnapPreview(immediately: false)
-    }
-
-    private var enabledEdgeSnapZones: Set<WindowEdgeSnapZone> {
-        WindowEdgeSnapZone.enabledZones(
-            from: UserDefaults.standard.string(forKey: DefaultsKey.windowEdgeSnapDisabledZones)
-        )
+        WindowLayoutOverlays.shared.endDrag()
     }
 
     private func showEdgeSnapPreview(frame: CGRect) {
@@ -2310,7 +2681,8 @@ private struct SettleContext {
     let frame: WindowLayoutFrame
     let targetRect: NSRect
     let screenVisibleFrame: NSRect
-    let action: WindowLayoutAction
+    let action: WindowLayoutAction?
+    let anchor: WindowPlacementAnchor
     let original: WindowLayoutFrame?
     let previousAction: WindowLayoutAction?
     let windowKey: WindowLayoutWindowKey
@@ -2347,7 +2719,21 @@ private struct WindowEdgeSnapDrag {
     var lastSampleAt: TimeInterval
     var mismatchCount: Int
     var isMoving: Bool
-    var target: WindowEdgeSnapTarget?
+    var target: WindowCommandDragTarget?
+    /// Set once the drag gave a snapped window its earlier size back.
+    var restoredFrame: CGRect?
+}
+
+private struct WindowCommandDragTarget: Equatable {
+    let commandID: UUID
+    let setKind: WindowCommandSetKind
+    let previewFrame: CGRect
+    let visibleFrame: CGRect
+}
+
+private struct WindowSnapRecord {
+    var placed: WindowLayoutFrame
+    var originalSize: CGSize
 }
 
 /// A press the tap is holding while it is still undecided. It keeps the
@@ -2418,4 +2804,21 @@ private extension NSRect {
         guard !isNull, !isEmpty else { return 0 }
         return width * height
     }
+}
+
+/// A snapshot of the window a menu acts on. The target itself stays private
+/// to the service; menus only read the facts.
+struct WindowCommandMenuContext {
+    let setKind: WindowCommandSetKind
+    /// The app the menu's Ignore item names; nil for Yaya's Space itself.
+    let appName: String?
+    let bundleID: String?
+    let isIgnored: Bool
+    let displayCount: Int
+    let canRestore: Bool
+    fileprivate let target: WindowLayoutTarget?
+    let screenFrame: CGRect?
+    let visibleFrame: CGRect?
+
+    var hasWindow: Bool { target != nil }
 }

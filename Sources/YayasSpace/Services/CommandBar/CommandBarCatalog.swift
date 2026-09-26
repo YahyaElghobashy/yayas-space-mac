@@ -645,7 +645,7 @@ enum CommandBarCatalog {
                     subtitle: layoutArea,
                     keywords: keywords,
                     icon: .symbol(action.symbolName),
-                    shortcut: action.savedShortcut,
+                    shortcut: WindowCommandStore.shared.shortcut(for: action),
                     trouble: axTrouble,
                     run: { _ in
                         afterBeat {

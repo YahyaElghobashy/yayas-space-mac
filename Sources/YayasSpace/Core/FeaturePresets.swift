@@ -98,13 +98,19 @@ extension AppFeature {
         case .textSnippets, .autoQuit:
             return .inputs
         case .windowLayout:
-            let edgeSnapRuns = UserDefaults.standard.bool(forKey: DefaultsKey.windowEdgeSnapEnabled)
+            let defaults = UserDefaults.standard
+            let edgeSnapRuns = defaults.bool(forKey: DefaultsKey.windowEdgeSnapEnabled)
                 && !WindowEdgeSnapZone.enabledZones(
-                    from: UserDefaults.standard.string(
+                    from: defaults.string(
                         forKey: DefaultsKey.windowEdgeSnapDisabledZones)
                 ).isEmpty
-            return UserDefaults.standard.bool(forKey: DefaultsKey.windowGestureEnabled)
+                && (defaults.bool(forKey: DefaultsKey.windowLayoutRestoreSizeOnDrag)
+                    || WindowCommandPersistence.hasEnabledDragAreas(in: defaults))
+            // The green-button menu watches the pointer (throttled, resting
+            // pointer only), so it counts as pointer input too.
+            return defaults.bool(forKey: DefaultsKey.windowGestureEnabled)
                 || edgeSnapRuns
+                || defaults.bool(forKey: DefaultsKey.windowLayoutGreenButtonMenuEnabled)
                 ? .pointer : .idle
         case .radialMenu:
             // With a side button configured the trigger is a mouse tap;

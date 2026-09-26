@@ -116,7 +116,7 @@ struct WindowLayoutSettings: View {
                 Text(text.shortcutsCaption)
                     .font(.caption)
                     .foregroundStyle(.secondary)
-                if !service.failedShortcutActions.isEmpty {
+                if !service.failedShortcuts.isEmpty {
                     Text(l10n.s.shortcutUnavailable)
                         .font(.caption)
                         .foregroundStyle(.orange)
@@ -422,7 +422,7 @@ private struct WindowLayoutActionRow: View {
             errorText = String(format: l10n.s.shortcutConflictFormat, "macOS")
             return
         }
-        if let conflict = WindowLayoutService.shared.shortcutConflictTitle(shortcut, excluding: action) {
+        if let conflict = WindowLayoutService.shared.shortcutConflictTitle(shortcut) {
             errorText = String(format: l10n.s.shortcutConflictFormat, conflict)
             return
         }
