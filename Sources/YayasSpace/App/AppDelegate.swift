@@ -1236,7 +1236,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSW
         NSApp.terminate(nil)
     }
 
-    @objc private func showAbout() {
+    @objc func showAbout() {
         NSApp.activate(ignoringOtherApps: true)
         let credits = NSAttributedString(
             string: L10n.shared.s.aboutDescription,

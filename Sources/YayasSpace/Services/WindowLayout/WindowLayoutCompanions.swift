@@ -15,6 +15,10 @@ enum WindowLayoutCompanions {
         WindowGreenButtonService.shared.sync(
             enabled: available && trusted
                 && defaults.bool(forKey: DefaultsKey.windowLayoutGreenButtonMenuEnabled))
+        // The menu-bar item works without the grant too: its commands grey
+        // out, and Settings is one click away.
+        WindowLayoutMenuBarController.shared.sync(
+            visible: available && defaults.bool(forKey: DefaultsKey.windowLayoutShowMenuBarItem))
     }
 
     static func suspend() {
