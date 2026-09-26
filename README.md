@@ -197,14 +197,12 @@ Without `actool` (full Xcode 26+) the adaptive icon catalog is skipped and the D
 
 ## Icon and brand
 
-The icon is the Yaya's Space mark: a posterized face inside a dark planet with a Saturn ring, on a paper `#F8F5F0` rounded square.
+One mark everywhere: Yahya's face as a ringed planet, drawn in a Rick and Morty cartoon style, with a sparkle, a star and small asteroids around it. The app icon puts it on a deep-space tile in the house plum and ink with stars; the menu bar glyph and the in-app mark are the same design redrawn as vector so they read at 18 px.
 
-- `Resources/Brand/AppIcon-Source.png` is the 1024×1024 master (the sticker, centred with margin, transparent background); `Resources/Brand/BrandMark-Source.png` is the same sticker tightly trimmed.
-- `Tools/MakeIcon.swift` renders everything from those two files at build time with CoreGraphics and ImageIO only: the `.iconset` and `AppIcon.icns` (sticker on the paper tile, corners at 22.5 % of the side), the 26×20 pt menu bar template glyph (the sticker's silhouette, black on transparent, from its alpha channel) and `BrandMark.png` (the same silhouette in white, tinted in-app). Regenerate with `swift Tools/MakeIcon.swift build/AppIcon.iconset`.
-- `Resources/Brand/AppIcon.icon` is the Icon Composer catalog with the sticker as its layer (`Assets/yayas-space-brandmark.png`), used only when `actool` is available.
-- `docs/assets/readme/logo.svg` and `logo-dark.svg` are the README wordmarks (the mark embedded as a small PNG); `icon.png` is the 256 px render.
-
-The upstream icon and logo were reserved brand material and are not in this repository.
+- `Resources/Brand/BrandMark-Source.png` is the logo: the full-colour mark, tightly trimmed, transparent background. `Resources/Brand/AppIcon-Source.png` is the same mark centred with margin on a 1024×1024 canvas. The artwork was generated in one image-model pass from a photo and the Yaya's Space newsletter logo, then cut out locally.
+- `Tools/MakeIcon.swift` renders everything at build time with CoreGraphics and ImageIO only: the `.iconset` and `AppIcon.icns` (the mark on the space tile, on the 824/1024 macOS grid, corners at 22.5 % of the side), the 26×20 pt menu bar template glyph and `BrandMark.png` (the vector mark, black and white templates). Regenerate with `swift Tools/MakeIcon.swift build/AppIcon.iconset`.
+- `Resources/Brand/AppIcon.icon` is the Icon Composer catalog with the mark as its layer (`Assets/yayas-space-brandmark.png`), used only when `actool` is available.
+- `docs/assets/readme/logo.svg` and `logo-dark.svg` are the README wordmarks (the app icon embedded as a small PNG next to the name); `icon.png` is the 256 px render.
 
 ## Documentation
 

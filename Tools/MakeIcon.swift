@@ -1,26 +1,25 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 Vorssaint
-// Copyright (C) 2026 Yahya Elghobashy (Yaya's Space icon)
+// Copyright (C) 2026 Yahya Elghobashy (Yaya's Space icon and mark)
 
-// Generates every icon asset for Yaya's Space from the two PNG masters in
-// Resources/Brand, with nothing but Foundation, CoreGraphics and ImageIO (no
-// ImageMagick, no AppKit drawing), so a bare macOS CI runner can run it:
+// Generates every icon asset for Yaya's Space with nothing but Foundation,
+// CoreGraphics and ImageIO (no ImageMagick, no AppKit drawing), so a bare macOS
+// CI runner can run it. One design everywhere: Yahya's face as a ringed planet,
+// drawn in a Rick and Morty cartoon style, with stars around it.
 //
-// - the app iconset and .icns: Resources/Brand/AppIcon-Source.png (the
-//   face-and-ring sticker, 1024x1024, transparent, centred with margin)
-//   composited onto a macOS-style rounded square on paper (#F8F5F0) with
-//   corners of 22.5 % of the tile's side, for every size the iconset needs
-// - the menu bar template glyph (MenuBarIcon.png / @2x): the sticker's
-//   silhouette (its alpha channel, filled black) on the 26x20 pt canvas
-//   StatusItemController.BlackHoleGlyph expects, so the planet-with-ring reads
-//   as a small monochrome mark that adapts to light and dark menu bars
-// - BrandMark.png: the same silhouette from Resources/Brand/BrandMark-Source.png
-//   (the tightly trimmed sticker), white on transparent, which the BrandMark
-//   view in Sources/YayasSpace/UI/Theme.swift draws as a template image and
-//   tints for whatever surface it sits on
+// - the app iconset and .icns: Resources/Brand/AppIcon-Source.png (the full-colour
+//   mark, 1024x1024, transparent, centred with margin) on a deep-space tile in the
+//   house plum and ink with star specks, a few twinkles and a faint lime glow,
+//   on the 824/1024 macOS icon grid with corners at 22.5 % of the tile's side
+// - the menu bar template glyph (MenuBarIcon.png / @2x) and BrandMark.png: the same
+//   mark redrawn as vector here (face-planet with curly hair, round eyes, grin, the
+//   ring across the chin with a cut gap, a sparkle and a star), because a silhouette
+//   of the full-colour art collapses into a blob at 18 px. Black on the 26x20 pt
+//   canvas StatusItemController.BlackHoleGlyph expects; white on a square canvas
+//   for the BrandMark view in Sources/YayasSpace/UI/Theme.swift, which tints it.
 //
 // The Icon Composer catalog in Resources/Brand/AppIcon.icon carries the same
-// sticker for builds that have actool (full Xcode 26+); without it the Dock
+// mark for builds that have actool (full Xcode 26+); without it the Dock
 // falls back to AppIcon.icns, which is what this script writes.
 //
 // Usage: swift Tools/MakeIcon.swift build/AppIcon.iconset
@@ -31,9 +30,15 @@ import UniformTypeIdentifiers
 
 // MARK: - Brand
 
-let paper = CGColor(colorSpace: CGColorSpace(name: CGColorSpace.sRGB)!,
-                    components: [0xF8 / 255, 0xF5 / 255, 0xF0 / 255, 1])!
-/// Corner radius of the paper tile as a fraction of its side.
+func srgb(_ hex: UInt32, _ alpha: CGFloat = 1) -> CGColor {
+    CGColor(colorSpace: CGColorSpace(name: CGColorSpace.sRGB)!,
+            components: [CGFloat((hex >> 16) & 0xFF) / 255, CGFloat((hex >> 8) & 0xFF) / 255,
+                         CGFloat(hex & 0xFF) / 255, alpha])!
+}
+let spaceTop = srgb(0x4A2574)      // house plum, lifted
+let spaceBottom = srgb(0x140724)   // house ink, deepened
+let lime = srgb(0xC4F25A)
+/// Corner radius of the tile as a fraction of its side.
 let tileCornerFraction: CGFloat = 0.225
 
 // Current macOS misreads PNG payloads in the legacy small chunks. It downsamples
@@ -52,7 +57,6 @@ let outDir = CommandLine.arguments.count > 1 ? CommandLine.arguments[1] : "AppIc
 /// but resolve the masters relative to this file so it also works from elsewhere.
 let repoRoot = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent()
 let appIconSource = repoRoot.appendingPathComponent("Resources/Brand/AppIcon-Source.png")
-let brandMarkSource = repoRoot.appendingPathComponent("Resources/Brand/BrandMark-Source.png")
 
 // MARK: - Image IO
 
@@ -85,130 +89,217 @@ func roundedRect(_ rect: CGRect, radius: CGFloat) -> CGPath {
     CGPath(roundedRect: rect, cornerWidth: radius, cornerHeight: radius, transform: nil)
 }
 
+/// Deterministic pseudo-random numbers, so every build draws the same stars.
+struct StarRandom {
+    var state: UInt64 = 0x5941_5941_5350_4143
+    mutating func next() -> CGFloat {
+        state = state &* 6364136223846793005 &+ 1442695040888963407
+        return CGFloat(state >> 33) / CGFloat(UInt32.max)
+    }
+}
+
+/// Four-point twinkle centred on `c` (outer radius `r`).
+func twinklePath(_ c: CGPoint, _ r: CGFloat) -> CGPath {
+    let p = CGMutablePath()
+    let inner = r * 0.22
+    for i in 0..<8 {
+        let angle = CGFloat(i) * .pi / 4 + .pi / 2
+        let radius = i % 2 == 0 ? r : inner
+        let point = CGPoint(x: c.x + cos(angle) * radius, y: c.y + sin(angle) * radius)
+        if i == 0 { p.move(to: point) } else { p.addLine(to: point) }
+    }
+    p.closeSubpath()
+    return p
+}
+
+/// Five-point star centred on `c` (outer radius `r`).
+func starPath(_ c: CGPoint, _ r: CGFloat) -> CGPath {
+    let p = CGMutablePath()
+    for i in 0..<10 {
+        let angle = CGFloat(i) * .pi / 5 + .pi / 2
+        let radius = i % 2 == 0 ? r : r * 0.45
+        let point = CGPoint(x: c.x + cos(angle) * radius, y: c.y + sin(angle) * radius)
+        if i == 0 { p.move(to: point) } else { p.addLine(to: point) }
+    }
+    p.closeSubpath()
+    return p
+}
+
 // MARK: - App icon
 
 /// macOS app icon grid: the rounded square sits on an 824/1024 footprint; the
 /// remaining margin is the transparent gutter every Dock icon keeps. The
-/// sticker master already carries its own margin inside its 1024 square, so
-/// it is drawn to fill the tile.
-func renderAppIcon(px: Int, sticker: CGImage) -> Data? {
+/// mark master already carries its own margin inside its 1024 square, so it
+/// is drawn to fill the tile.
+func renderAppIcon(px: Int, mark: CGImage) -> Data? {
     let size = CGFloat(px)
     guard let ctx = canvas(px, px) else { return nil }
     ctx.clear(CGRect(x: 0, y: 0, width: size, height: size))
+    let u = size / 1024
 
-    let inset = size * 100 / 1024
+    let inset = 100 * u
     let square = CGRect(x: inset, y: inset, width: size - inset * 2, height: size - inset * 2)
     let tile = roundedRect(square, radius: square.width * tileCornerFraction)
 
     // Soft shadow under the tile so it reads on light Finder backgrounds too.
     ctx.saveGState()
     ctx.setShadow(offset: CGSize(width: 0, height: -size * 0.012), blur: size * 0.03,
-                  color: CGColor(gray: 0, alpha: 0.18))
-    ctx.setFillColor(paper)
+                  color: CGColor(gray: 0, alpha: 0.28))
+    ctx.setFillColor(spaceBottom)
     ctx.addPath(tile)
     ctx.fillPath()
     ctx.restoreGState()
 
-    // Hairline edge so the paper tile has a boundary on white surfaces.
-    ctx.saveGState()
-    ctx.setStrokeColor(CGColor(gray: 0.1, alpha: 0.12))
-    ctx.setLineWidth(max(1, size / 512))
-    ctx.addPath(tile)
-    ctx.strokePath()
-    ctx.restoreGState()
-
-    // The sticker, clipped to the tile so its ring never leaves the paper.
     ctx.saveGState()
     ctx.addPath(tile)
     ctx.clip()
-    ctx.draw(sticker, in: square)
+    // Deep space: house plum at the top into ink at the bottom.
+    let sRGB = CGColorSpace(name: CGColorSpace.sRGB)!
+    let space = CGGradient(colorsSpace: sRGB, colors: [spaceTop, spaceBottom] as CFArray, locations: [0, 1])!
+    ctx.drawLinearGradient(space, start: CGPoint(x: size / 2, y: square.maxY),
+                           end: CGPoint(x: size / 2, y: square.minY), options: [])
+    // A faint lime glow behind the planet.
+    let glow = CGGradient(colorsSpace: sRGB, colors: [srgb(0xC4F25A, 0.30), srgb(0xC4F25A, 0.08), srgb(0xC4F25A, 0)] as CFArray,
+                          locations: [0, 0.5, 1])!
+    ctx.drawRadialGradient(glow, startCenter: CGPoint(x: size / 2, y: size * 0.5), startRadius: 0,
+                           endCenter: CGPoint(x: size / 2, y: size * 0.5), endRadius: 400 * u, options: [])
+    // Star specks and a few twinkles; skipped at the smallest sizes where they are noise.
+    if px >= 64 {
+        var random = StarRandom()
+        for _ in 0..<70 {
+            let point = CGPoint(x: square.minX + random.next() * square.width, y: square.minY + random.next() * square.height)
+            let radius = (1.1 + random.next() * 2.6) * u
+            ctx.setFillColor(CGColor(gray: 1, alpha: 0.30 + random.next() * 0.55))
+            ctx.fillEllipse(in: CGRect(x: point.x - radius, y: point.y - radius, width: radius * 2, height: radius * 2))
+        }
+        let twinkles: [(CGFloat, CGFloat, CGFloat)] = [(178, 820, 20), (842, 862, 15), (866, 196, 18), (150, 214, 13), (520, 896, 11)]
+        ctx.setFillColor(CGColor(gray: 1, alpha: 0.9))
+        for (x, y, r) in twinkles {
+            ctx.addPath(twinklePath(CGPoint(x: x * u, y: y * u), r * u))
+            ctx.fillPath()
+        }
+    }
+    // Top sheen.
+    let sheen = CGGradient(colorsSpace: sRGB, colors: [CGColor(gray: 1, alpha: 0.10), CGColor(gray: 1, alpha: 0)] as CFArray,
+                           locations: [0, 1])!
+    ctx.drawLinearGradient(sheen, start: CGPoint(x: size / 2, y: square.maxY),
+                           end: CGPoint(x: size / 2, y: square.maxY - 300 * u), options: [])
+    // The mark, with a drop shadow so it lifts off the tile.
+    ctx.setShadow(offset: CGSize(width: 0, height: -12 * u), blur: 26 * u, color: CGColor(gray: 0, alpha: 0.45))
+    ctx.draw(mark, in: square)
+    ctx.restoreGState()
+
+    // Hairline edge so the dark tile separates from dark wallpapers.
+    ctx.saveGState()
+    ctx.setStrokeColor(CGColor(gray: 1, alpha: 0.14))
+    ctx.setLineWidth(max(1, size / 512))
+    ctx.addPath(tile)
+    ctx.strokePath()
     ctx.restoreGState()
 
     guard let image = ctx.makeImage() else { return nil }
     return pngData(image)
 }
 
-// MARK: - Silhouette
+// MARK: - The mark as vector (menu bar glyph and in-app brand mark)
 
-/// The sticker reduced to its alpha channel: every pixel becomes `ink` with
-/// the sticker's opacity, so the result is a flat one-colour template image.
-func silhouette(of image: CGImage, ink: CGColor) -> CGImage? {
-    guard let ctx = canvas(image.width, image.height) else { return nil }
-    let rect = CGRect(x: 0, y: 0, width: image.width, height: image.height)
-    ctx.clear(rect)
-    // clip(to:mask:) with an alpha-carrying image uses its alpha as the mask.
-    ctx.clip(to: rect, mask: image)
+/// The mark in a 24 x 16 unit box, drawn in `ink` with holes cut out (clear), so
+/// it works as a template image. The same design as the full-colour master:
+/// the face is the planet, the ring crosses the chin, a sparkle and a star sit
+/// top left and top right.
+let markBox = CGSize(width: 24, height: 16)
+
+func drawVectorMark(in ctx: CGContext, target: CGRect, ink: CGColor) {
+    let scale = min(target.width / markBox.width, target.height / markBox.height)
+    ctx.saveGState()
+    ctx.translateBy(x: target.midX - markBox.width * scale / 2, y: target.midY - markBox.height * scale / 2)
+    ctx.scaleBy(x: scale, y: scale)
     ctx.setFillColor(ink)
-    ctx.fill(rect)
-    // The posterized face leaves a few one-pixel transparent specks inside
-    // the sticker. Label every connected transparent region; the ones that
-    // are enclosed by ink and tiny are specks and get filled solid, while the
-    // outside, the antialiased edge and the real gaps between ring and planet
-    // (large regions) are left alone.
-    guard let data = ctx.data else { return nil }
-    let width = ctx.width, height = ctx.height, stride = ctx.bytesPerRow
-    let bytes = data.bindMemory(to: UInt8.self, capacity: stride * height)
-    let speckLimit = max(16, width * height / 4000)
-    var seen = [Bool](repeating: false, count: width * height)
-    func isClear(_ x: Int, _ y: Int) -> Bool { bytes[y * stride + x * 4 + 3] < 128 }
-    for startY in 0..<height {
-        for startX in 0..<width where !seen[startY * width + startX] && isClear(startX, startY) {
-            var region = [startY * width + startX]
-            seen[region[0]] = true
-            var touchesBorder = false
-            var head = 0
-            while head < region.count {
-                let index = region[head]; head += 1
-                let x = index % width, y = index / width
-                if x == 0 || y == 0 || x == width - 1 || y == height - 1 { touchesBorder = true }
-                for (nx, ny) in [(x - 1, y), (x + 1, y), (x, y - 1), (x, y + 1)]
-                where nx >= 0 && ny >= 0 && nx < width && ny < height && !seen[ny * width + nx] && isClear(nx, ny) {
-                    seen[ny * width + nx] = true
-                    region.append(ny * width + nx)
-                }
-            }
-            guard !touchesBorder, region.count <= speckLimit else { continue }
-            let gray = UInt8(((ink.components?.first ?? 0) * 255).rounded())
-            for index in region {
-                let i = (index / width) * stride + (index % width) * 4
-                bytes[i] = gray; bytes[i + 1] = gray; bytes[i + 2] = gray; bytes[i + 3] = 255
-            }
-        }
-    }
-    return ctx.makeImage()
-}
 
-/// Bounding box of the pixels with any opacity, so a silhouette can be fitted
-/// by its ink rather than by the master's margins.
-func inkBounds(of image: CGImage) -> CGRect? {
-    let width = image.width, height = image.height
-    guard let ctx = CGContext(data: nil, width: width, height: height, bitsPerComponent: 8,
-                              bytesPerRow: width, space: CGColorSpaceCreateDeviceGray(),
-                              bitmapInfo: CGImageAlphaInfo.alphaOnly.rawValue)
-    else { return nil }
-    ctx.draw(image, in: CGRect(x: 0, y: 0, width: width, height: height))
-    guard let data = ctx.data else { return nil }
-    let bytes = data.bindMemory(to: UInt8.self, capacity: width * height)
-    var minX = width, minY = height, maxX = -1, maxY = -1
-    for y in 0..<height {
-        for x in 0..<width where bytes[y * width + x] > 8 {
-            minX = min(minX, x); maxX = max(maxX, x)
-            minY = min(minY, y); maxY = max(maxY, y)
-        }
-    }
-    guard maxX >= minX, maxY >= minY else { return nil }
-    return CGRect(x: minX, y: minY, width: maxX - minX + 1, height: maxY - minY + 1)
-}
+    let head = CGPoint(x: 12, y: 8.0)
+    let headRadius: CGFloat = 5.5
+    let headRect = CGRect(x: head.x - headRadius, y: head.y - headRadius, width: headRadius * 2, height: headRadius * 2)
 
-/// Draws `image`'s ink box scaled to fit `target` and centred in it.
-func drawFitted(_ image: CGImage, ink: CGRect, in ctx: CGContext, target: CGRect) {
-    let scale = min(target.width / ink.width, target.height / ink.height)
-    let drawSize = CGSize(width: CGFloat(image.width) * scale, height: CGFloat(image.height) * scale)
-    // Bitmap rows are top-down in inkBounds; CoreGraphics draws bottom-up.
-    let inkOriginY = CGFloat(image.height) - ink.maxY
-    let origin = CGPoint(x: target.midX - (ink.minX + ink.width / 2) * scale,
-                         y: target.midY - (inkOriginY + ink.height / 2) * scale)
-    ctx.draw(image, in: CGRect(origin: origin, size: drawSize))
+    // Head (the planet), ears, and curly hair bumps over the top.
+    let face = CGMutablePath()
+    face.addEllipse(in: headRect)
+    for x in [6.55, 17.45] as [CGFloat] {
+        face.addEllipse(in: CGRect(x: x - 1.05, y: 8.6 - 1.25, width: 2.1, height: 2.5))
+    }
+    for (degrees, radius) in [(18.0, 1.35), (38.0, 1.5), (58.0, 1.55), (79.0, 1.6), (101.0, 1.6), (122.0, 1.55), (142.0, 1.5), (162.0, 1.35)] as [(CGFloat, CGFloat)] {
+        let angle = degrees * .pi / 180
+        let c = CGPoint(x: head.x + cos(angle) * 5.2, y: head.y + sin(angle) * 5.2)
+        face.addEllipse(in: CGRect(x: c.x - radius, y: c.y - radius, width: radius * 2, height: radius * 2))
+    }
+    ctx.addPath(face)
+    ctx.fillPath()
+
+    ctx.setBlendMode(.clear)
+    // Hairline: a curly cut across the forehead separates hair from face.
+    let hairline = CGMutablePath()
+    hairline.move(to: CGPoint(x: 7.5, y: 11.25))
+    var x: CGFloat = 7.5
+    var up = true
+    while x < 16.5 {
+        let next = min(x + 1.5, 16.5)
+        hairline.addQuadCurve(to: CGPoint(x: next, y: 11.25), control: CGPoint(x: (x + next) / 2, y: up ? 12.05 : 10.75))
+        x = next
+        up.toggle()
+    }
+    ctx.addPath(hairline.copy(strokingWithWidth: 0.55, lineCap: .round, lineJoin: .round, miterLimit: 4))
+    ctx.fillPath()
+    // Eyes: round whites (holes).
+    for x in [10.1, 13.9] as [CGFloat] {
+        ctx.fillEllipse(in: CGRect(x: x - 1.45, y: 9.3 - 1.45, width: 2.9, height: 2.9))
+    }
+    // Grin: a wide D shape.
+    let grin = CGMutablePath()
+    grin.move(to: CGPoint(x: 9.7, y: 6.9))
+    grin.addLine(to: CGPoint(x: 14.3, y: 6.9))
+    grin.addArc(center: CGPoint(x: 12, y: 6.9), radius: 2.3, startAngle: 0, endAngle: .pi, clockwise: true)
+    grin.closeSubpath()
+    ctx.addPath(grin)
+    ctx.fillPath()
+    ctx.setBlendMode(.normal)
+    ctx.setFillColor(ink)
+    // Pupils, looking slightly inward (the show's goofy stare).
+    for x in [10.4, 13.6] as [CGFloat] {
+        ctx.fillEllipse(in: CGRect(x: x - 0.62, y: 9.15 - 0.62, width: 1.24, height: 1.24))
+    }
+    // Teeth line.
+    ctx.fill(CGRect(x: 10.0, y: 6.05, width: 4.0, height: 0.34))
+
+    // The ring: a tilted ellipse band. The back half hides behind the head; the
+    // front half crosses the jaw below the grin with a clear gap on both sides.
+    var ringTransform = CGAffineTransform(translationX: 12, y: 5.0).rotated(by: 12 * .pi / 180)
+    let ellipse = CGPath(ellipseIn: CGRect(x: -11.2, y: -2.7, width: 22.4, height: 5.4), transform: &ringTransform)
+    let band = ellipse.copy(strokingWithWidth: 1.25, lineCap: .butt, lineJoin: .round, miterLimit: 4)
+    let gap = ellipse.copy(strokingWithWidth: 1.25 + 1.3, lineCap: .butt, lineJoin: .round, miterLimit: 4)
+    let backHalf = CGPath(rect: CGRect(x: -40, y: 0, width: 80, height: 40), transform: &ringTransform)
+    let frontHalf = CGPath(rect: CGRect(x: -40, y: -40, width: 80, height: 40), transform: &ringTransform)
+
+    ctx.saveGState()
+    ctx.addPath(backHalf); ctx.clip()
+    let outsideHead = CGMutablePath()
+    outsideHead.addRect(CGRect(x: -10, y: -10, width: 44, height: 36))
+    outsideHead.addEllipse(in: headRect.insetBy(dx: -1.2, dy: -0.2))
+    ctx.addPath(outsideHead); ctx.clip(using: .evenOdd)
+    ctx.addPath(band); ctx.fillPath()
+    ctx.restoreGState()
+
+    ctx.saveGState()
+    ctx.addPath(frontHalf); ctx.clip()
+    ctx.setBlendMode(.clear)
+    ctx.addPath(gap); ctx.fillPath()
+    ctx.setBlendMode(.normal)
+    ctx.setFillColor(ink)
+    ctx.addPath(band); ctx.fillPath()
+    ctx.restoreGState()
+
+    // Stars around it.
+    ctx.addPath(twinklePath(CGPoint(x: 2.4, y: 13.6), 2.3)); ctx.fillPath()
+    ctx.addPath(starPath(CGPoint(x: 21.7, y: 14.0), 1.9)); ctx.fillPath()
+    ctx.restoreGState()
 }
 
 // MARK: - Menu bar glyph (template)
@@ -217,15 +308,15 @@ func drawFitted(_ image: CGImage, ink: CGRect, in ctx: CGContext, target: CGRect
 // so the same canvas can hold the Keep Awake symbols. Keep in sync with
 // BlackHoleGlyph.pointSize in Sources/YayasSpace/App/StatusItemController.swift.
 let menuBarCanvas = (width: 26, height: 20)
-let menuBarGlyphHeight: CGFloat = 14
+let menuBarGlyphHeight: CGFloat = 16
 
-func renderMenuBarIcon(scale: Int, mark: CGImage, ink: CGRect) -> Data? {
+func renderMenuBarIcon(scale: Int) -> Data? {
     let width = menuBarCanvas.width * scale, height = menuBarCanvas.height * scale
     guard let ctx = canvas(width, height) else { return nil }
     ctx.clear(CGRect(x: 0, y: 0, width: width, height: height))
     let inkHeight = menuBarGlyphHeight * CGFloat(scale)
     let target = CGRect(x: 0, y: (CGFloat(height) - inkHeight) / 2, width: CGFloat(width), height: inkHeight)
-    drawFitted(mark, ink: ink, in: ctx, target: target)
+    drawVectorMark(in: ctx, target: target, ink: CGColor(gray: 0, alpha: 1))
     guard let image = ctx.makeImage() else { return nil }
     return pngData(image)
 }
@@ -264,13 +355,12 @@ func fail(_ message: String) -> Never {
     exit(1)
 }
 
-guard let sticker = loadImage(appIconSource) else { fail("cannot read \(appIconSource.path)") }
-guard let trimmed = loadImage(brandMarkSource) else { fail("cannot read \(brandMarkSource.path)") }
+guard let mark = loadImage(appIconSource) else { fail("cannot read \(appIconSource.path)") }
 
 try? FileManager.default.createDirectory(atPath: outDir, withIntermediateDirectories: true)
 var icnsEntries: [(type: String, data: Data)] = []
 for (name, px, icnsType) in iconSizes {
-    guard let data = renderAppIcon(px: px, sticker: sticker) else { fail("failed to render \(name)") }
+    guard let data = renderAppIcon(px: px, mark: mark) else { fail("failed to render \(name)") }
     try data.write(to: URL(fileURLWithPath: "\(outDir)/\(name).png"))
     if let icnsType {
         icnsEntries.append((type: icnsType, data: data))
@@ -278,28 +368,19 @@ for (name, px, icnsType) in iconSizes {
 }
 try writeICNS(entries: icnsEntries, to: URL(fileURLWithPath: "\(outDir)/../AppIcon.icns"))
 
-// Black silhouette of the trimmed sticker for the menu bar; the trimmed master
-// is the same artwork as the icon's, so both marks stay identical in shape.
-guard let blackMark = silhouette(of: trimmed, ink: CGColor(gray: 0, alpha: 1)),
-      let markInk = inkBounds(of: blackMark)
-else { fail("failed to derive the menu bar silhouette") }
 for scale in [1, 2] {
-    guard let data = renderMenuBarIcon(scale: scale, mark: blackMark, ink: markInk) else {
-        fail("failed to render menu bar icon @\(scale)x")
-    }
+    guard let data = renderMenuBarIcon(scale: scale) else { fail("failed to render menu bar icon @\(scale)x") }
     let suffix = scale == 1 ? "" : "@2x"
     try data.write(to: URL(fileURLWithPath: "\(outDir)/../MenuBarIcon\(suffix).png"))
 }
 
-// Trimmed mark for in-app use (template: white ink, transparent elsewhere),
-// fitted into a square canvas so BrandMark(width:) sizes it predictably.
+// In-app mark (template: white ink, transparent elsewhere), on a square canvas
+// so BrandMark(width:) sizes it predictably.
 let markSize = 640
-guard let whiteMark = silhouette(of: trimmed, ink: CGColor(gray: 1, alpha: 1)),
-      let markCanvas = canvas(markSize, markSize)
-else { fail("failed to derive the brand mark") }
+guard let markCanvas = canvas(markSize, markSize) else { fail("failed to allocate the brand mark") }
 markCanvas.clear(CGRect(x: 0, y: 0, width: markSize, height: markSize))
-drawFitted(whiteMark, ink: markInk, in: markCanvas,
-           target: CGRect(x: 0, y: 0, width: markSize, height: markSize).insetBy(dx: 16, dy: 16))
+drawVectorMark(in: markCanvas, target: CGRect(x: 0, y: 0, width: markSize, height: markSize).insetBy(dx: 16, dy: 16),
+               ink: CGColor(gray: 1, alpha: 1))
 guard let markImage = markCanvas.makeImage(), let markData = pngData(markImage) else { fail("failed to encode the brand mark") }
 try markData.write(to: URL(fileURLWithPath: "\(outDir)/../BrandMark.png"))
 print("iconset written to \(outDir)")

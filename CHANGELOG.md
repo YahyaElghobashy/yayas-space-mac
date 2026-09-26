@@ -4,6 +4,11 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project uses
 [Semantic Versioning](https://semver.org/).
 
+## [1.0.1] - 2026-09-27
+
+### Changed
+- **One mark everywhere.** The icon, the logo, the in-app mark and the menu bar glyph are now the same design: Yahya's face as a ringed planet, drawn in a Rick and Morty cartoon style, with a sparkle, a star and small asteroids around it. The app icon puts it on a deep-space tile in the house plum and ink with stars. The menu bar glyph and the in-app mark are drawn from vector in `Tools/MakeIcon.swift` (face-planet, curly hair, round eyes, grin, ring across the jaw), so they stay recognisable at 18 px instead of a silhouette of the full-colour art.
+
 ## [1.0.0] - 2026-09-22
 
 Yaya's Space: the sealed fork of Vorssaint 3.3.5, rebranded. Everything below this entry is the upstream Vorssaint history, kept as is.
