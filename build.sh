@@ -417,6 +417,13 @@ if (( TEST )); then
         Sources/YayasSpace/Services/Metrics/SustainedAlertGate.swift \
         Sources/YayasSpace/Services/WindowLayout/WindowLayoutSupport.swift \
         Sources/YayasSpace/Services/WindowLayout/WindowGestureSupport.swift \
+        Sources/YayasSpace/Services/WindowLayout/WindowCommandModel.swift \
+        Sources/YayasSpace/Services/WindowLayout/WindowCommandDefaults.swift \
+        Sources/YayasSpace/Services/WindowLayout/WindowCommandPersistence.swift \
+        Sources/YayasSpace/Services/WindowLayout/WindowCommandSupport.swift \
+        Sources/YayasSpace/Services/WindowLayout/WindowCommandStore.swift \
+        Sources/YayasSpace/Services/WindowLayout/WindowLayoutSyncSupport.swift \
+        Sources/YayasSpace/Core/WindowCommandStrings.swift \
         Sources/YayasSpace/Core/WindowDirectionalStrings.swift \
         Sources/YayasSpace/Services/CleaningMode/CleaningUnlockCounter.swift \
         Sources/YayasSpace/Services/Display/ExtraBrightnessSupport.swift \
@@ -429,6 +436,7 @@ if (( TEST )); then
         Tests/MetricsTests.swift \
         Tests/RecentCaptureStoreTests.swift \
         Tests/RecorderPresetImageStoreTests.swift \
+        Tests/WindowCommandTests.swift \
         -o build/metrics-tests
     # `set -e` would end the script on a failing run before the sweep below.
     test_status=0

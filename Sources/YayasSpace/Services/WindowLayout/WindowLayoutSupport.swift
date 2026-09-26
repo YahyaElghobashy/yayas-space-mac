@@ -13,6 +13,10 @@ enum WindowLayoutTargetCapability: Equatable {
 enum WindowLayoutAction: String, CaseIterable, Identifiable {
     case leftHalf, rightHalf, topHalf, bottomHalf, centerHalf
     case leftThird, centerThird, rightThird, leftTwoThirds, rightTwoThirds
+    // Added with the command sets: the missing middle two thirds and the
+    // thirds of a portrait display, which run across instead of down.
+    case centerTwoThirds
+    case topThird, middleThird, bottomThird, topTwoThirds, middleTwoThirds, bottomTwoThirds
     case topLeftSixth, topCenterSixth, topRightSixth
     case bottomLeftSixth, bottomCenterSixth, bottomRightSixth
     case topLeft, topRight, bottomLeft, bottomRight
@@ -24,6 +28,8 @@ enum WindowLayoutAction: String, CaseIterable, Identifiable {
     static let shortcutActions: [WindowLayoutAction] = [
         .leftHalf, .rightHalf, .topHalf, .bottomHalf, .centerHalf,
         .leftThird, .centerThird, .rightThird, .leftTwoThirds, .rightTwoThirds,
+        .centerTwoThirds,
+        .topThird, .middleThird, .bottomThird, .topTwoThirds, .middleTwoThirds, .bottomTwoThirds,
         .topLeftSixth, .topCenterSixth, .topRightSixth,
         .bottomLeftSixth, .bottomCenterSixth, .bottomRightSixth,
         .topLeft, .topRight, .bottomLeft, .bottomRight,
@@ -75,6 +81,13 @@ enum WindowLayoutAction: String, CaseIterable, Identifiable {
         case .previousDisplay: return 54
         case .marginMaximize: return 55
         case .centerHalf: return 57
+        case .centerTwoThirds: return 58
+        case .topThird: return 59
+        case .middleThird: return 60
+        case .bottomThird: return 61
+        case .topTwoThirds: return 62
+        case .middleTwoThirds: return 63
+        case .bottomTwoThirds: return 64
         }
     }
 
@@ -112,6 +125,13 @@ enum WindowLayoutAction: String, CaseIterable, Identifiable {
         case .bottomLeftSixth: return DefaultsKey.windowLayoutShortcutBottomLeftSixth
         case .bottomCenterSixth: return DefaultsKey.windowLayoutShortcutBottomCenterSixth
         case .bottomRightSixth: return DefaultsKey.windowLayoutShortcutBottomRightSixth
+        case .centerTwoThirds: return DefaultsKey.windowLayoutShortcutCenterTwoThirds
+        case .topThird: return DefaultsKey.windowLayoutShortcutTopThird
+        case .middleThird: return DefaultsKey.windowLayoutShortcutMiddleThird
+        case .bottomThird: return DefaultsKey.windowLayoutShortcutBottomThird
+        case .topTwoThirds: return DefaultsKey.windowLayoutShortcutTopTwoThirds
+        case .middleTwoThirds: return DefaultsKey.windowLayoutShortcutMiddleTwoThirds
+        case .bottomTwoThirds: return DefaultsKey.windowLayoutShortcutBottomTwoThirds
         }
     }
 
@@ -139,8 +159,12 @@ enum WindowLayoutAction: String, CaseIterable, Identifiable {
         case .nextDisplay: return .windowLayoutNextDisplayDefault
         case .topLeftSixth, .topCenterSixth, .topRightSixth,
                 .bottomLeftSixth, .bottomCenterSixth, .bottomRightSixth,
-                .marginMaximize, .fullScreen, .previousDisplay, .centerHalf:
+                .marginMaximize, .fullScreen, .previousDisplay, .centerHalf,
+                .centerTwoThirds, .topThird, .middleThird, .bottomThird,
+                .topTwoThirds, .middleTwoThirds, .bottomTwoThirds:
             // New actions must never claim a system-wide combination unasked.
+            // The command sets carry their own defaults; this is only the
+            // legacy per-action value migration compares against.
             return nil
         }
     }
@@ -210,6 +234,13 @@ enum WindowLayoutAction: String, CaseIterable, Identifiable {
         case .bottomRightSixth: return text.bottomRightSixth
         case .previousDisplay: return text.previousDisplay
         case .nextDisplay: return text.nextDisplay
+        case .centerTwoThirds: return text.centerTwoThirds
+        case .topThird: return text.topThird
+        case .middleThird: return text.middleThird
+        case .bottomThird: return text.bottomThird
+        case .topTwoThirds: return text.topTwoThirds
+        case .middleTwoThirds: return text.middleTwoThirds
+        case .bottomTwoThirds: return text.bottomTwoThirds
         }
     }
 
@@ -239,8 +270,50 @@ enum WindowLayoutAction: String, CaseIterable, Identifiable {
         case .previousDisplay: return "arrow.left.to.line"
         case .nextDisplay: return "arrow.right.to.line"
         case .restore: return "arrow.uturn.backward"
+        case .centerTwoThirds: return "rectangle.center.inset.filled"
+        case .topThird: return "rectangle.topthird.inset.filled"
+        case .middleThird: return "rectangle.center.inset.filled"
+        case .bottomThird: return "rectangle.bottomthird.inset.filled"
+        case .topTwoThirds: return "rectangle.tophalf.inset.filled"
+        case .middleTwoThirds: return "rectangle.inset.filled"
+        case .bottomTwoThirds: return "rectangle.bottomhalf.inset.filled"
         }
     }
+
+    /// The screen edges a built-in added with the command sets is pinned to.
+    /// These use the shared edge rule for anchoring and acceptance; the
+    /// earlier built-ins keep the rules they were tuned with.
+    var edgeContactPlacement: WindowLayoutEdgeContact? {
+        switch self {
+        case .centerTwoThirds: return [.top, .bottom]
+        case .topThird, .topTwoThirds: return [.left, .right, .top]
+        case .middleThird, .middleTwoThirds: return [.left, .right]
+        case .bottomThird, .bottomTwoThirds: return [.left, .right, .bottom]
+        default: return nil
+        }
+    }
+}
+
+/// The edges of the layout frame a placement touches. A window that cannot
+/// take the exact target size stays pinned to them: both of an axis means
+/// the full extent, one means that side, none means centred.
+struct WindowLayoutEdgeContact: OptionSet, Hashable {
+    let rawValue: Int
+
+    static let left = WindowLayoutEdgeContact(rawValue: 1 << 0)
+    static let right = WindowLayoutEdgeContact(rawValue: 1 << 1)
+    static let top = WindowLayoutEdgeContact(rawValue: 1 << 2)
+    static let bottom = WindowLayoutEdgeContact(rawValue: 1 << 3)
+
+    static let all: WindowLayoutEdgeContact = [.left, .right, .top, .bottom]
+}
+
+/// How a placement anchors a window and how the settle check recognises it:
+/// a built-in keeps its own rules, a free grid area follows the edges it
+/// touches.
+enum WindowPlacementAnchor: Equatable {
+    case action(WindowLayoutAction)
+    case edges(WindowLayoutEdgeContact)
 }
 
 /// The configurable spacing around snapped windows (issue #1068). Values are
@@ -362,6 +435,15 @@ enum WindowLayoutGeometry {
         default:
             break
         }
+        return shavingSharedEdges(rect, in: frame, windowGap: windowGap)
+    }
+
+    /// The shared-edge rule on its own, for any rectangle: grid areas of the
+    /// command sets follow it exactly like the built-in placements.
+    static func shavingSharedEdges(_ rect: CGRect,
+                                   in frame: CGRect,
+                                   windowGap: CGFloat) -> CGRect {
+        guard windowGap > 0 else { return rect }
         let half = windowGap / 2
         var result = rect
         if result.minX - frame.minX > 1 {
@@ -390,6 +472,7 @@ enum WindowLayoutGeometry {
         let halfHeight = visibleFrame.height / 2
         let thirdWidth = visibleFrame.width / 3
         let twoThirdsWidth = thirdWidth * 2
+        let thirdHeight = visibleFrame.height / 3
         switch action {
         case .leftHalf:
             return CGRect(x: visibleFrame.minX, y: visibleFrame.minY,
@@ -421,6 +504,27 @@ enum WindowLayoutGeometry {
         case .rightTwoThirds:
             return CGRect(x: visibleFrame.maxX - twoThirdsWidth, y: visibleFrame.minY,
                           width: twoThirdsWidth, height: visibleFrame.height).integral
+        case .centerTwoThirds:
+            return CGRect(x: visibleFrame.minX + thirdWidth / 2, y: visibleFrame.minY,
+                          width: twoThirdsWidth, height: visibleFrame.height).integral
+        case .topThird:
+            return CGRect(x: visibleFrame.minX, y: visibleFrame.maxY - thirdHeight,
+                          width: visibleFrame.width, height: thirdHeight).integral
+        case .middleThird:
+            return CGRect(x: visibleFrame.minX, y: visibleFrame.minY + thirdHeight,
+                          width: visibleFrame.width, height: thirdHeight).integral
+        case .bottomThird:
+            return CGRect(x: visibleFrame.minX, y: visibleFrame.minY,
+                          width: visibleFrame.width, height: thirdHeight).integral
+        case .topTwoThirds:
+            return CGRect(x: visibleFrame.minX, y: visibleFrame.maxY - thirdHeight * 2,
+                          width: visibleFrame.width, height: thirdHeight * 2).integral
+        case .middleTwoThirds:
+            return CGRect(x: visibleFrame.minX, y: visibleFrame.minY + thirdHeight / 2,
+                          width: visibleFrame.width, height: thirdHeight * 2).integral
+        case .bottomTwoThirds:
+            return CGRect(x: visibleFrame.minX, y: visibleFrame.minY,
+                          width: visibleFrame.width, height: thirdHeight * 2).integral
         case .topLeftSixth:
             return CGRect(x: visibleFrame.minX, y: visibleFrame.midY,
                           width: thirdWidth, height: halfHeight).integral
@@ -480,6 +584,10 @@ enum WindowLayoutGeometry {
         guard action != .maximize, action != .restore,
               action != .previousDisplay, action != .nextDisplay,
               action != .fullScreen else { return targetRect.integral }
+        if let contact = action.edgeContactPlacement {
+            return anchoredRect(contact: contact, targetRect: targetRect,
+                                actualSize: actualSize, visibleFrame: visibleFrame)
+        }
 
         let size = CGSize(width: max(1, actualSize.width),
                           height: max(1, actualSize.height))
@@ -540,7 +648,9 @@ enum WindowLayoutGeometry {
         case .marginMaximize, .center:
             origin.x = targetRect.midX - size.width / 2
             origin.y = targetRect.midY - size.height / 2
-        case .maximize, .previousDisplay, .nextDisplay, .restore, .fullScreen:
+        case .maximize, .previousDisplay, .nextDisplay, .restore, .fullScreen,
+             .centerTwoThirds, .topThird, .middleThird, .bottomThird,
+             .topTwoThirds, .middleTwoThirds, .bottomTwoThirds:
             break
         }
 
@@ -561,6 +671,10 @@ enum WindowLayoutGeometry {
                         targetRect: CGRect,
                         action: WindowLayoutAction,
                         anchorTolerance: CGFloat) -> Bool {
+        if let contact = action.edgeContactPlacement {
+            return accepts(actualRect: actualRect, targetRect: targetRect,
+                           contact: contact, anchorTolerance: anchorTolerance)
+        }
         guard actualRect.width > 80, actualRect.height > 80 else { return false }
         let intersection = actualRect.intersection(targetRect)
         let overlap = area(intersection) / max(1, area(targetRect))
@@ -655,6 +769,140 @@ enum WindowLayoutGeometry {
             return false
         case .fullScreen:
             return false
+        case .centerTwoThirds, .topThird, .middleThird, .bottomThird,
+             .topTwoThirds, .middleTwoThirds, .bottomTwoThirds:
+            // Answered by the shared edge rule above.
+            return false
+        }
+    }
+
+    // MARK: Edge-contact placements (grid areas and the newer built-ins)
+
+    /// Anchors a window that could not take the exact target size to the
+    /// edges the target touches, then keeps it on the visible frame. Full
+    /// height and full width anchor like the built-in halves do.
+    static func anchoredRect(contact: WindowLayoutEdgeContact,
+                             targetRect: CGRect,
+                             actualSize: CGSize,
+                             visibleFrame: CGRect) -> CGRect {
+        let size = CGSize(width: max(1, actualSize.width), height: max(1, actualSize.height))
+        var origin = targetRect.origin
+        if contact.contains(.left) {
+            origin.x = targetRect.minX
+        } else if contact.contains(.right) {
+            origin.x = targetRect.maxX - size.width
+        } else {
+            origin.x = targetRect.midX - size.width / 2
+        }
+        if contact.contains(.bottom) {
+            origin.y = targetRect.minY
+        } else if contact.contains(.top) {
+            origin.y = targetRect.maxY - size.height
+        } else {
+            origin.y = targetRect.midY - size.height / 2
+        }
+        if size.width <= visibleFrame.width {
+            origin.x = min(max(origin.x, visibleFrame.minX), visibleFrame.maxX - size.width)
+        } else {
+            origin.x = visibleFrame.minX
+        }
+        if size.height <= visibleFrame.height {
+            origin.y = min(max(origin.y, visibleFrame.minY), visibleFrame.maxY - size.height)
+        } else {
+            origin.y = visibleFrame.minY
+        }
+        return CGRect(origin: origin, size: size).integral
+    }
+
+    /// Whether a window close to an edge-contact target counts as placed:
+    /// each axis keeps its anchor (or the full extent when both of its edges
+    /// are touched), and enough of the target is covered.
+    static func accepts(actualRect: CGRect,
+                        targetRect: CGRect,
+                        contact: WindowLayoutEdgeContact,
+                        anchorTolerance: CGFloat) -> Bool {
+        guard actualRect.width > 80, actualRect.height > 80 else { return false }
+        let overlap = area(actualRect.intersection(targetRect)) / max(1, area(targetRect))
+        if contact == .all { return overlap > 0.90 }
+        let fullWidth = actualRect.width >= targetRect.width * 0.82
+            || (abs(actualRect.minX - targetRect.minX) <= anchorTolerance
+                && abs(actualRect.maxX - targetRect.maxX) <= anchorTolerance)
+        let fullHeight = actualRect.height >= targetRect.height * 0.82
+            || (abs(actualRect.minY - targetRect.minY) <= anchorTolerance
+                && abs(actualRect.maxY - targetRect.maxY) <= anchorTolerance)
+        let horizontal: Bool
+        if contact.contains(.left), contact.contains(.right) {
+            horizontal = fullWidth
+        } else if contact.contains(.left) {
+            horizontal = abs(actualRect.minX - targetRect.minX) <= anchorTolerance
+        } else if contact.contains(.right) {
+            horizontal = abs(actualRect.maxX - targetRect.maxX) <= anchorTolerance
+        } else {
+            horizontal = abs(actualRect.midX - targetRect.midX) <= anchorTolerance
+        }
+        let vertical: Bool
+        if contact.contains(.top), contact.contains(.bottom) {
+            vertical = fullHeight
+        } else if contact.contains(.top) {
+            vertical = abs(actualRect.maxY - targetRect.maxY) <= anchorTolerance
+        } else if contact.contains(.bottom) {
+            vertical = abs(actualRect.minY - targetRect.minY) <= anchorTolerance
+        } else {
+            vertical = abs(actualRect.midY - targetRect.midY) <= anchorTolerance
+        }
+        let spansAnAxis = (contact.contains(.left) && contact.contains(.right))
+            || (contact.contains(.top) && contact.contains(.bottom))
+        return horizontal && vertical && overlap > (spansAnAxis ? 0.45 : 0.35)
+    }
+
+    static func anchoredRect(for anchor: WindowPlacementAnchor,
+                             targetRect: CGRect,
+                             actualSize: CGSize,
+                             visibleFrame: CGRect) -> CGRect {
+        switch anchor {
+        case .action(let action):
+            return anchoredRect(for: action, targetRect: targetRect,
+                                actualSize: actualSize, visibleFrame: visibleFrame)
+        case .edges(let contact):
+            return anchoredRect(contact: contact, targetRect: targetRect,
+                                actualSize: actualSize, visibleFrame: visibleFrame)
+        }
+    }
+
+    static func accepts(actualRect: CGRect,
+                        targetRect: CGRect,
+                        anchor: WindowPlacementAnchor,
+                        anchorTolerance: CGFloat) -> Bool {
+        switch anchor {
+        case .action(let action):
+            return accepts(actualRect: actualRect, targetRect: targetRect,
+                           action: action, anchorTolerance: anchorTolerance)
+        case .edges(let contact):
+            return accepts(actualRect: actualRect, targetRect: targetRect,
+                           contact: contact, anchorTolerance: anchorTolerance)
+        }
+    }
+
+    /// Whether a stubborn window may be coaxed through a maximized scratch
+    /// frame before the placement is tried again. Only placements that tile
+    /// part of the screen qualify.
+    static func usesMaximizeFallback(_ anchor: WindowPlacementAnchor) -> Bool {
+        switch anchor {
+        case .edges(let contact):
+            return contact != .all
+        case .action(let action):
+            switch action {
+            case .leftHalf, .rightHalf, .topHalf, .bottomHalf, .centerHalf,
+                 .leftThird, .centerThird, .rightThird, .leftTwoThirds, .rightTwoThirds,
+                 .centerTwoThirds, .topThird, .middleThird, .bottomThird,
+                 .topTwoThirds, .middleTwoThirds, .bottomTwoThirds,
+                 .topLeftSixth, .topCenterSixth, .topRightSixth,
+                 .bottomLeftSixth, .bottomCenterSixth, .bottomRightSixth,
+                 .topLeft, .topRight, .bottomLeft, .bottomRight, .marginMaximize:
+                return true
+            case .maximize, .fullScreen, .center, .restore, .previousDisplay, .nextDisplay:
+                return false
+            }
         }
     }
 
@@ -816,6 +1064,13 @@ struct WindowLayoutHistory {
             }
         }
         return nil
+    }
+
+    /// The frame Restore would return to, without taking it off the history.
+    /// Menus use it to grey Restore out when there is nothing to go back to.
+    func peekPrevious(for window: WindowLayoutWindowKey,
+                      current: WindowLayoutFrame) -> WindowLayoutFrame? {
+        framesByWindow[window]?.last { !$0.isClose(to: current, tolerance: 1) }
     }
 
     mutating func discardLatest(for window: WindowLayoutWindowKey) {

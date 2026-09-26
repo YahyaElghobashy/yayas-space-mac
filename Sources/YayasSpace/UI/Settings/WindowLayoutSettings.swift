@@ -292,6 +292,7 @@ struct WindowLayoutSettings: View {
         case .previousDisplay: return "arrow.left.to.line"
         case .nextDisplay: return "arrow.right.to.line"
         case .restore: return "arrow.uturn.backward"
+        default: return action.symbolName
         }
     }
 

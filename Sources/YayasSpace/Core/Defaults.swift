@@ -639,6 +639,33 @@ enum DefaultsKey {
     static let windowLayoutShortcutBottomLeftSixth = "windowLayoutShortcutBottomLeftSixth"
     static let windowLayoutShortcutBottomCenterSixth = "windowLayoutShortcutBottomCenterSixth"
     static let windowLayoutShortcutBottomRightSixth = "windowLayoutShortcutBottomRightSixth"
+    static let windowLayoutShortcutCenterTwoThirds = "windowLayoutShortcutCenterTwoThirds"
+    static let windowLayoutShortcutTopThird = "windowLayoutShortcutTopThird"
+    static let windowLayoutShortcutMiddleThird = "windowLayoutShortcutMiddleThird"
+    static let windowLayoutShortcutBottomThird = "windowLayoutShortcutBottomThird"
+    static let windowLayoutShortcutTopTwoThirds = "windowLayoutShortcutTopTwoThirds"
+    static let windowLayoutShortcutMiddleTwoThirds = "windowLayoutShortcutMiddleTwoThirds"
+    static let windowLayoutShortcutBottomTwoThirds = "windowLayoutShortcutBottomTwoThirds"
+    // Window command sets (1.1.0). The per-action shortcut keys above are only
+    // read once more, to carry a customised shortcut into its command.
+    static let windowLayoutCommands = "windowLayoutCommands" // versioned JSON of both command sets
+    static let windowLayoutShowMenuBarItem = "windowLayoutShowMenuBarItem"
+    static let windowLayoutRestoreSizeOnDrag = "windowLayoutRestoreSizeOnDrag"
+    static let windowLayoutHighlightAreas = "windowLayoutHighlightAreas"
+    static let windowLayoutInteriorAreaScale = "windowLayoutInteriorAreaScale" // percent
+    static let windowLayoutEdgeAreaWidth = "windowLayoutEdgeAreaWidth" // points
+    static let windowLayoutPreviewStyle = "windowLayoutPreviewStyle" // WindowLayoutPreviewStyle raw value
+    static let windowLayoutPreviewBorderWidth = "windowLayoutPreviewBorderWidth" // points
+    static let windowLayoutGreenButtonMenuEnabled = "windowLayoutGreenButtonMenuEnabled"
+    static let windowLayoutGreenButtonDelay = "windowLayoutGreenButtonDelay" // milliseconds
+    static let windowLayoutGreenButtonLayout = "windowLayoutGreenButtonLayout" // WindowGreenButtonMenuLayout raw value
+    static let windowLayoutFitTightly = "windowLayoutFitTightly" // no screen margin, window margin kept
+    static let windowLayoutIgnoredApps = "windowLayoutIgnoredApps" // [bundle id]
+    // Machine state, never exported: where this Mac syncs and when it last did.
+    static let windowLayoutSyncFolder = "windowLayoutSyncFolder"
+    static let windowLayoutSettingsModifiedAt = "windowLayoutSettingsModifiedAt"
+    static let windowLayoutSyncedAt = "windowLayoutSyncedAt"
+    static let windowLayoutSyncNote = "windowLayoutSyncNote"
 
     // Text snippets: type a trigger, get the expansion.
     static let textSnippetsEnabled = "textSnippetsEnabled"
@@ -1372,6 +1399,33 @@ enum Defaults {
         DefaultsKey.windowLayoutShortcutBottomCenterSixth: WindowLayoutAction.clearedShortcutStorageValue,
         DefaultsKey.windowLayoutShortcutBottomRightSixth: WindowLayoutAction.clearedShortcutStorageValue,
         DefaultsKey.windowLayoutShortcutFullScreen: WindowLayoutAction.clearedShortcutStorageValue,
+        DefaultsKey.windowLayoutShortcutCenterTwoThirds: WindowLayoutAction.clearedShortcutStorageValue,
+        DefaultsKey.windowLayoutShortcutTopThird: WindowLayoutAction.clearedShortcutStorageValue,
+        DefaultsKey.windowLayoutShortcutMiddleThird: WindowLayoutAction.clearedShortcutStorageValue,
+        DefaultsKey.windowLayoutShortcutBottomThird: WindowLayoutAction.clearedShortcutStorageValue,
+        DefaultsKey.windowLayoutShortcutTopTwoThirds: WindowLayoutAction.clearedShortcutStorageValue,
+        DefaultsKey.windowLayoutShortcutMiddleTwoThirds: WindowLayoutAction.clearedShortcutStorageValue,
+        DefaultsKey.windowLayoutShortcutBottomTwoThirds: WindowLayoutAction.clearedShortcutStorageValue,
+        // Everything that could fight another window manager ships off:
+        // snapping, the shortcuts master switch (above) and the green-button
+        // menu. The menu bar icon waits to be asked for too.
+        DefaultsKey.windowLayoutCommands: "",
+        DefaultsKey.windowLayoutShowMenuBarItem: false,
+        DefaultsKey.windowLayoutRestoreSizeOnDrag: true,
+        DefaultsKey.windowLayoutHighlightAreas: false,
+        DefaultsKey.windowLayoutInteriorAreaScale: WindowActivationSettings.defaultInteriorScalePercent,
+        DefaultsKey.windowLayoutEdgeAreaWidth: WindowActivationSettings.defaultEdgeWidth,
+        DefaultsKey.windowLayoutPreviewStyle: WindowLayoutPreviewStyle.system.rawValue,
+        DefaultsKey.windowLayoutPreviewBorderWidth: WindowLayoutPreviewStyle.defaultBorderWidth,
+        DefaultsKey.windowLayoutGreenButtonMenuEnabled: false,
+        DefaultsKey.windowLayoutGreenButtonDelay: WindowGreenButtonMenuLayout.defaultDelayMilliseconds,
+        DefaultsKey.windowLayoutGreenButtonLayout: WindowGreenButtonMenuLayout.list.rawValue,
+        DefaultsKey.windowLayoutFitTightly: false,
+        DefaultsKey.windowLayoutIgnoredApps: [String](),
+        DefaultsKey.windowLayoutSyncFolder: "",
+        DefaultsKey.windowLayoutSettingsModifiedAt: 0.0,
+        DefaultsKey.windowLayoutSyncedAt: 0.0,
+        DefaultsKey.windowLayoutSyncNote: "",
     ]
 
     static func register() {

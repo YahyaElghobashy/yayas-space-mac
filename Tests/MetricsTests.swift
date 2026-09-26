@@ -6553,6 +6553,10 @@ struct MetricsTests {
         expect(WindowDirectionalGestureSupport.action(from: dirOrigin, to: CGPoint(x: 160, y: 160)) == .bottomLeft,
                "moving down-left triggers bottom left")
 
+        // MARK: Window command sets (Tests/WindowCommandTests.swift)
+
+        WindowCommandTests.run { expect($0, $1) }
+
         expect(MediaImageFormat.sanitized("pdf") == .pdf,
                "Image converter accepts the PDF format")
         expect(MediaImageFormat.pdf.fileExtension == "pdf",
