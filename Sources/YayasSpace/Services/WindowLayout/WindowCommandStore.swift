@@ -44,11 +44,12 @@ final class WindowCommandStore: ObservableObject {
         configuration.command(id: id)
     }
 
-    /// The shortcut a built-in currently answers to, for the surfaces that
-    /// list built-ins (the panel grid, the command bar).
+    /// The shortcut the surfaces that list built-ins (the panel grid, the
+    /// command bar) print next to one: the shortcut of the user's command
+    /// that picking it runs, when every connected kind of display agrees.
     func shortcut(for action: WindowLayoutAction,
-                  in kind: WindowCommandSetKind = .horizontal) -> GlobalShortcut? {
-        configuration[kind].first { $0.builtinID == action && $0.effectiveShortcut != nil }?.effectiveShortcut
+                  displayKinds: Set<WindowCommandSetKind>) -> GlobalShortcut? {
+        WindowCommandRouting.labelShortcut(for: action, in: configuration, displayKinds: displayKinds)
     }
 
     // MARK: Editing

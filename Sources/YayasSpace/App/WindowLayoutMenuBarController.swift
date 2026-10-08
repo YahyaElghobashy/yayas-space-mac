@@ -2,14 +2,17 @@
 // Copyright (C) 2026 Yahya Elghobashy
 
 import AppKit
+import ApplicationServices
 import Carbon.HIToolbox
 
 /// Window Layout's own menu-bar item, separate from Yaya's Space's icon. Its
 /// menu lists the commands marked for the menu bar, from the set of the
 /// display the front window is on, greyed where they could not change that
 /// window, followed by settings, the ignore switch for the front app, help,
-/// About and Quit. The menu is rebuilt each time it opens and holds nothing
-/// in between.
+/// About and Quit. The window is the front app's own, looked up once when
+/// the menu opens; a command chosen from it acts on that window and nothing
+/// else. The menu is rebuilt each time it opens and holds nothing in
+/// between.
 final class WindowLayoutMenuBarController: NSObject, NSMenuDelegate {
     static let shared = WindowLayoutMenuBarController()
 
@@ -78,7 +81,9 @@ final class WindowLayoutMenuBarController: NSObject, NSMenuDelegate {
                                   action: #selector(runCommand(_:)),
                                   keyEquivalent: "")
             item.target = self
-            item.representedObject = command.id
+            item.representedObject = MenuCommandChoice(commandID: command.id,
+                                                       setKind: context.setKind,
+                                                       window: context.window)
             item.image = WindowCommandGlyph.image(for: command.kind, grid: grid,
                                                   size: NSSize(width: 21, height: 14))
             Self.keepImageVisible(item)
@@ -134,17 +139,22 @@ final class WindowLayoutMenuBarController: NSObject, NSMenuDelegate {
     }
 
     @objc private func runCommand(_ sender: NSMenuItem) {
-        guard let id = sender.representedObject as? UUID,
-              let found = WindowCommandStore.shared.command(id: id) else { return }
-        // After the menu is gone, so the app in front is the one acted on.
+        guard let choice = sender.representedObject as? MenuCommandChoice,
+              let window = choice.window,
+              let found = WindowCommandStore.shared.command(id: choice.commandID) else { return }
+        // After the menu is gone, on the window it was opened for.
         DispatchQueue.main.async {
-            if case .failure = WindowLayoutService.shared.apply(found.command, setKind: found.kind) {
+            if case .failure = WindowLayoutService.shared.apply(found.command,
+                                                                setKind: choice.setKind,
+                                                                window: window) {
                 NSSound.beep()
             }
         }
     }
 
     @objc private func openSettings() {
+        // Always the General tab, whichever tab was open last.
+        WindowLayoutSettingsTabs.shared.tab = .general
         SettingsRouter.shared.page = .windowLayout
         appDelegate()?.openSettingsWindow()
     }
@@ -240,5 +250,19 @@ final class WindowLayoutMenuBarController: NSObject, NSMenuDelegate {
         }
         image.isTemplate = true
         return image
+    }
+}
+
+/// What a command row of the menu carries: which command, from which set,
+/// and the window the menu was opened for.
+private final class MenuCommandChoice: NSObject {
+    let commandID: UUID
+    let setKind: WindowCommandSetKind
+    let window: AXUIElement?
+
+    init(commandID: UUID, setKind: WindowCommandSetKind, window: AXUIElement?) {
+        self.commandID = commandID
+        self.setKind = setKind
+        self.window = window
     }
 }

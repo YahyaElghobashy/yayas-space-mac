@@ -633,6 +633,9 @@ enum CommandBarCatalog {
             let layoutText = FeatureStrings.windowLayout(language)
             let layoutArea = area(.windowLayout)
             let axTrouble = accessibilityTrouble()
+            // Each row runs the user's command for its built-in, so the hint
+            // is that command's shortcut, shown when every display agrees.
+            let displayKinds = WindowLayoutService.connectedSetKinds()
             for action in WindowLayoutAction.allCases {
                 // The two ways of taking the whole screen answer to each
                 // other's names: someone typing "full screen" means either.
@@ -645,7 +648,7 @@ enum CommandBarCatalog {
                     subtitle: layoutArea,
                     keywords: keywords,
                     icon: .symbol(action.symbolName),
-                    shortcut: WindowCommandStore.shared.shortcut(for: action),
+                    shortcut: WindowCommandStore.shared.shortcut(for: action, displayKinds: displayKinds),
                     trouble: axTrouble,
                     run: { _ in
                         afterBeat {

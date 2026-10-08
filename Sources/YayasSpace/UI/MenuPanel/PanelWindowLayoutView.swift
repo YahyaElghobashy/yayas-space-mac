@@ -216,6 +216,9 @@ struct PanelWindowLayoutView: View {
     private func actionGroup(title groupTitle: String, actions: [WindowLayoutAction]) -> some View {
         let hidden = hiddenActions
         let shown = editingActions ? actions : actions.filter { !hidden.contains($0) }
+        // A pick runs the user's command for the built-in, so the shortcut
+        // printed is that command's, shown when every display agrees on it.
+        let displayKinds = WindowLayoutService.connectedSetKinds()
         if !shown.isEmpty {
             VStack(alignment: .leading, spacing: 7) {
                 Text(groupTitle.uppercased())
@@ -238,7 +241,8 @@ struct PanelWindowLayoutView: View {
                                     .lineLimit(1)
                                     .minimumScaleFactor(0.82)
                                 if shortcutsEnabled,
-                                   let shortcut = WindowCommandStore.shared.shortcut(for: action) {
+                                   let shortcut = WindowCommandStore.shared.shortcut(for: action,
+                                                                                     displayKinds: displayKinds) {
                                     Text(shortcut.displayString)
                                         .font(.system(size: 9, weight: .medium, design: .rounded))
                                         .foregroundStyle(.secondary)

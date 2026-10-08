@@ -16,6 +16,7 @@ enum WindowCommandTests {
         multiDisplay(expect)
         activationHitTesting(expect)
         availability(expect)
+        routingAndRepeatRules(expect)
         menusAndPlacement(expect)
         restoreOnDrag(expect)
         persistence(expect)
@@ -506,6 +507,95 @@ enum WindowCommandTests {
                 && WindowLayoutIgnoreList.contains("COM.APPLE.SAFARI", in: list)
                 && WindowLayoutIgnoreList.toggled("com.apple.Safari", in: ["com.apple.Safari"]).isEmpty,
                "the ignore list keeps one entry per app and matches regardless of case")
+    }
+
+    // MARK: Routing and repeat rules
+
+    private static func routingAndRepeatRules(_ expect: (Bool, String) -> Void) {
+        // What a menu greys out depends on what its window lets change.
+        typealias Availability = WindowCommandAvailability
+        let area = WindowCommandKind.area(GridRect(x: 0, y: 0, width: 12, height: 12))
+        expect(Availability.requiredCapabilities(for: area) == [.move, .resize]
+                && Availability.requiredCapabilities(for: .maximize) == [.move, .resize]
+                && Availability.requiredCapabilities(for: .nextDisplay) == [.move, .resize]
+                && Availability.requiredCapabilities(for: .center) == .move
+                && Availability.requiredCapabilities(for: .restore) == .move
+                && Availability.requiredCapabilities(for: .fullScreen) == .fullScreen,
+               "an area or a maximize needs the window to resize; centring and restoring only to move")
+        var context = Availability.Context(hasWindow: true, appIsIgnored: false, displayCount: 2,
+                                           canRestore: true,
+                                           currentFrame: CGRect(x: 100, y: 100, width: 800, height: 600),
+                                           targetFrame: nil, capabilities: .move)
+        expect(!Availability.isEnabled(area, context: context)
+                && !Availability.isEnabled(.maximize, context: context)
+                && !Availability.isEnabled(.marginMaximize, context: context)
+                && !Availability.isEnabled(.previousDisplay, context: context)
+                && !Availability.isEnabled(.fullScreen, context: context),
+               "a window that moves but cannot resize greys out every command that sets its size")
+        expect(Availability.isEnabled(.center, context: context)
+                && Availability.isEnabled(.restore, context: context),
+               "centring and restoring stay available for a window that only moves")
+        context.capabilities = .fullScreen
+        expect(Availability.isEnabled(.fullScreen, context: context)
+                && !Availability.isEnabled(.center, context: context),
+               "a window in full screen offers only Full Screen")
+        context.capabilities = .all
+        expect(Availability.isEnabled(area, context: context),
+               "a window that moves and resizes takes an area")
+
+        // Only the keyboard and the built-in pickers repeat.
+        expect(WindowCommandOrigin.shortcut.appliesRepeatRules
+                && WindowCommandOrigin.builtinPicker.appliesRepeatRules
+                && !WindowCommandOrigin.menu.appliesRepeatRules
+                && !WindowCommandOrigin.drop.appliesRepeatRules,
+               "menu choices and drops never take the keyboard's repeat rules")
+        expect(WindowLayoutGeometry.displayCrossing(
+                    for: .leftHalf, previousAction: WindowCommandOrigin.shortcut.previousAction(.leftHalf)) != nil
+                && WindowLayoutGeometry.displayCrossing(
+                    for: .leftHalf, previousAction: WindowCommandOrigin.menu.previousAction(.leftHalf)) == nil
+                && WindowLayoutGeometry.displayCrossing(
+                    for: .rightHalf, previousAction: WindowCommandOrigin.menu.previousAction(.rightHalf)) == nil,
+               "Left or Right twice crosses to the next display from a shortcut, never from a menu")
+        expect(WindowLayoutGeometry.effectiveAction(
+                    for: .topHalf, current: .zero, visibleFrame: landscapeVisible,
+                    previousAction: WindowCommandOrigin.shortcut.previousAction(.topHalf)) == .maximize
+                && WindowLayoutGeometry.effectiveAction(
+                    for: .topHalf, current: .zero, visibleFrame: landscapeVisible,
+                    previousAction: WindowCommandOrigin.menu.previousAction(.topHalf)) == .topHalf,
+               "Top twice maximizes from a shortcut; chosen from a menu, Top stays Top")
+
+        // The pickers run the user's command for a built-in.
+        var configuration = WindowCommandConfiguration.defaults
+        let leftIndex = configuration.horizontal.firstIndex { $0.builtinID == .leftHalf }!
+        let edited = GridRect(x: 0, y: 0, width: 10, height: 12)
+        configuration.horizontal[leftIndex].kind = .area(edited)
+        expect(WindowCommandRouting.command(for: .leftHalf, in: configuration.horizontal)?.kind == .area(edited),
+               "picking a built-in runs the user's edited command, not the shipped placement")
+        expect(WindowCommandRouting.command(for: .leftThird, in: configuration.vertical) == nil
+                && WindowCommandRouting.command(for: .topThird, in: configuration.vertical) != nil,
+               "a set without the built-in leaves the pick to the built-in as shipped")
+        let leftKey = shortcut(kVK_LeftArrow, [.control, .option])
+        let thirdKey = shortcut(kVK_ANSI_D, [.control, .option])
+        expect(WindowCommandRouting.labelShortcut(for: .leftThird, in: configuration, displayKinds: [.horizontal])
+                == thirdKey
+                && WindowCommandRouting.labelShortcut(for: .leftThird, in: configuration,
+                                                      displayKinds: [.vertical]) == nil
+                && WindowCommandRouting.labelShortcut(for: .leftThird, in: configuration,
+                                                      displayKinds: [.horizontal, .vertical]) == nil
+                && WindowCommandRouting.labelShortcut(for: .leftHalf, in: configuration,
+                                                      displayKinds: [.horizontal, .vertical]) == leftKey,
+               "a picker prints the shortcut of the command it runs, only where every display agrees")
+        let custom = shortcut(kVK_ANSI_L, [.control, .option, .command])
+        configuration.horizontal[leftIndex].shortcut = custom
+        expect(WindowCommandRouting.labelShortcut(for: .leftHalf, in: configuration, displayKinds: [.horizontal])
+                == custom
+                && WindowCommandRouting.labelShortcut(for: .leftHalf, in: configuration,
+                                                      displayKinds: [.horizontal, .vertical]) == nil,
+               "a changed shortcut shows next to the built-in whose command now answers to it")
+        configuration.horizontal[leftIndex].shortcutEnabled = false
+        expect(WindowCommandRouting.labelShortcut(for: .leftHalf, in: configuration,
+                                                  displayKinds: [.horizontal]) == nil,
+               "a switched-off shortcut is not printed")
     }
 
     // MARK: Menus and placement

@@ -275,6 +275,17 @@ enum WindowActivationHitTest {
     }
 }
 
+/// What a window lets Accessibility change about it.
+struct WindowCommandCapabilities: OptionSet, Hashable {
+    let rawValue: Int
+
+    static let move = WindowCommandCapabilities(rawValue: 1 << 0)
+    static let resize = WindowCommandCapabilities(rawValue: 1 << 1)
+    static let fullScreen = WindowCommandCapabilities(rawValue: 1 << 2)
+
+    static let all: WindowCommandCapabilities = [.move, .resize, .fullScreen]
+}
+
 /// Whether a command can change the focused window, which decides greyed
 /// items in the menu-bar and green-button menus.
 enum WindowCommandAvailability {
@@ -287,17 +298,38 @@ enum WindowCommandAvailability {
         /// nil when the target cannot be computed ahead of time.
         var currentFrame: CGRect?
         var targetFrame: CGRect?
+        /// What the window lets Accessibility change.
+        var capabilities: WindowCommandCapabilities = .all
 
         static let noWindow = Context(hasWindow: false, appIsIgnored: false, displayCount: 1,
-                                      canRestore: false, currentFrame: nil, targetFrame: nil)
+                                      canRestore: false, currentFrame: nil, targetFrame: nil,
+                                      capabilities: [])
     }
 
     /// Frames closer than this count as the same placement.
     static let sameFrameTolerance: CGFloat = 2
 
+    /// What a command has to change to do its work: an area, a maximize or a
+    /// display move sets the whole frame, so it needs the window to resize
+    /// as well as move; centring and restoring only need it to move.
+    static func requiredCapabilities(for kind: WindowCommandKind) -> WindowCommandCapabilities {
+        switch kind {
+        case .area, .maximize, .marginMaximize, .nextDisplay, .previousDisplay:
+            return [.move, .resize]
+        case .center, .restore:
+            return .move
+        case .fullScreen:
+            return .fullScreen
+        case .separator:
+            return []
+        }
+    }
+
     static func isEnabled(_ kind: WindowCommandKind, context: Context) -> Bool {
         if kind.isSeparator { return false }
-        guard context.hasWindow, !context.appIsIgnored else { return false }
+        guard context.hasWindow, !context.appIsIgnored,
+              context.capabilities.isSuperset(of: requiredCapabilities(for: kind))
+        else { return false }
         switch kind {
         case .nextDisplay, .previousDisplay:
             return context.displayCount > 1
@@ -318,6 +350,56 @@ enum WindowCommandAvailability {
             && abs(lhs.minY - rhs.minY) <= sameFrameTolerance
             && abs(lhs.width - rhs.width) <= sameFrameTolerance
             && abs(lhs.height - rhs.height) <= sameFrameTolerance
+    }
+}
+
+/// Where a command was chosen. Only the keyboard and the built-in pickers
+/// (the main-panel grid, the radial menu, the command bar) keep the repeat
+/// rules: the same side twice crosses to the display beside it, Top twice
+/// maximizes. A command picked from the menu-bar or green-button menu, or
+/// tried from Settings, does exactly what it says every time, and a drop
+/// lands where it was dropped.
+enum WindowCommandOrigin: Equatable {
+    case shortcut
+    case builtinPicker
+    case menu
+    case drop
+
+    var appliesRepeatRules: Bool {
+        switch self {
+        case .shortcut, .builtinPicker: return true
+        case .menu, .drop: return false
+        }
+    }
+
+    /// The earlier placement the repeat rules compare with, or nil when
+    /// they do not apply to this origin.
+    func previousAction(_ stored: WindowLayoutAction?) -> WindowLayoutAction? {
+        appliesRepeatRules ? stored : nil
+    }
+}
+
+/// How the surfaces that list built-ins (the main-panel grid, the radial
+/// menu, the command bar) reach the user's commands.
+enum WindowCommandRouting {
+    /// The user's command for a built-in in one set: the first command that
+    /// started as it, whatever its area or name became. Nil when the set has
+    /// none, and the built-in then runs as shipped.
+    static func command(for action: WindowLayoutAction, in set: [WindowCommand]) -> WindowCommand? {
+        set.first { !$0.isSeparator && $0.builtinID == action }
+    }
+
+    /// The shortcut a picker prints next to a built-in. It is the shortcut
+    /// of the command the pick runs, so it is shown only when every kind of
+    /// display connected agrees on it; otherwise nothing is promised.
+    static func labelShortcut(for action: WindowLayoutAction,
+                              in configuration: WindowCommandConfiguration,
+                              displayKinds: Set<WindowCommandSetKind>) -> GlobalShortcut? {
+        let shortcuts = WindowCommandSetKind.allCases.filter(displayKinds.contains).map {
+            command(for: action, in: configuration[$0])?.effectiveShortcut
+        }
+        guard let first = shortcuts.first, shortcuts.allSatisfy({ $0 == first }) else { return nil }
+        return first
     }
 }
 

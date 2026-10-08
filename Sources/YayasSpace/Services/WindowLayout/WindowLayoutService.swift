@@ -177,21 +177,44 @@ final class WindowLayoutService: ObservableObject {
         return shortcutConflictTitle(shortcut)
     }
 
+    /// A built-in picked on the main-panel grid, the radial menu or the
+    /// command bar. It runs the user's command for that built-in from the
+    /// set of the display the window is on, so the shortcut printed next to
+    /// it and what happens always agree; only a set without that built-in
+    /// runs it as shipped. Ignored apps are left alone.
     @discardableResult
     func apply(_ action: WindowLayoutAction) -> WindowLayoutResult {
         guard AXIsProcessTrusted() else {
             return finish(.failure(.missingAccessibility))
         }
-        guard let target = focusedTarget(for: action) else {
+        let configuration = commands
+        let screens = NSScreen.screens
+        var route: (command: WindowCommand?, kind: WindowCommandSetKind)?
+        let resolved = focusedTarget(frontAppOnly: false) { candidate in
+            // The set, the command and the check all come from this window.
+            let kind = setKind(for: candidate.frame, screens: screens)
+            let command = WindowCommandRouting.command(for: action, in: configuration[kind])
+            let capability = command.map { capability(for: $0, setKind: kind) } ?? action.targetCapability
+            guard supports(capability, candidate) else { return .skip }
+            route = (command, kind)
+            return .accept
+        }
+        guard let target = resolved, let route else {
             return finish(.failure(.noWindow))
         }
-        return apply(action, to: target)
+        guard !isIgnored(processID: target.key.processID) else { return .failure(.noWindow) }
+        if let command = route.command {
+            return apply(command, setKind: route.kind, to: target, dropVisibleFrame: nil, historyFrame: nil,
+                         origin: .builtinPicker)
+        }
+        return apply(action, to: target, origin: .builtinPicker)
     }
 
     private func apply(_ action: WindowLayoutAction,
                        to target: WindowLayoutTarget,
                        dropVisibleFrame: NSRect? = nil,
-                       historyFrame: WindowLayoutFrame? = nil) -> WindowLayoutResult {
+                       historyFrame: WindowLayoutFrame? = nil,
+                       origin: WindowCommandOrigin) -> WindowLayoutResult {
         pruneWindowState(keeping: target.key)
 
         if action == .restore {
@@ -263,9 +286,12 @@ final class WindowLayoutService: ObservableObject {
             frameHistory.discardLatest(for: target.key)
             return finish(.failure(.failed))
         }
+        // Only the keyboard and the built-in pickers repeat: a menu choice
+        // or a drop does what it names every time.
+        let previousAction = origin.previousAction(lastActions[target.key])
         if dropVisibleFrame == nil,
            let crossing = WindowLayoutGeometry.displayCrossing(for: action,
-                                                               previousAction: lastActions[target.key]),
+                                                               previousAction: previousAction),
            accepted(actual: target.frame,
                     targetRect: placement(for: action,
                                           current: target.frame,
@@ -294,7 +320,8 @@ final class WindowLayoutService: ObservableObject {
         }
         return applyPlacement(action,
                               to: target,
-                              visibleFrame: screen.visibleFrame)
+                              visibleFrame: screen.visibleFrame,
+                              cyclesRepeatedAction: origin.appliesRepeatRules)
     }
 
     /// Applies a pointer-selected snap target to one exact external window.
@@ -349,6 +376,18 @@ final class WindowLayoutService: ObservableObject {
     }
 
     private func focusedTarget(capability: WindowLayoutTargetCapability) -> WindowLayoutTarget? {
+        focusedTarget(frontAppOnly: false) { supports(capability, $0) ? .accept : .skip }
+    }
+
+    /// The window a keyboard or menu command acts on, looked up once: the
+    /// front app's focused window, then its main window, then its other
+    /// windows, and, unless `frontAppOnly`, the same for the recently used
+    /// apps after it. `judge` sees every candidate once and decides: take
+    /// it, look further, or stop with nothing. Whatever it decides about a
+    /// window (its set, its command, the capability needed) is decided from
+    /// that same window, so nothing is resolved twice.
+    private func focusedTarget(frontAppOnly: Bool,
+                               judge: (WindowLayoutCandidate) -> WindowCandidateVerdict) -> WindowLayoutTarget? {
         let ownBundleID = Bundle.main.bundleIdentifier
         let ownPID = ProcessInfo.processInfo.processIdentifier
         let ownKeyWindow = NSApp.keyWindow
@@ -358,9 +397,12 @@ final class WindowLayoutService: ObservableObject {
         let frontmost = hasFocusedResizableOwnWindow
             ? ownPID
             : NSWorkspace.shared.frontmostApplication?.processIdentifier
-        let pids = ([frontmost].compactMap { $0 } + WindowUseTracker.shared.apps).reduce(into: [pid_t]()) { result, pid in
+        var pids = ([frontmost].compactMap { $0 } + WindowUseTracker.shared.apps).reduce(into: [pid_t]()) { result, pid in
             if !result.contains(pid) { result.append(pid) }
         }
+        // A menu acts on the app in front and nothing else: an app without a
+        // window of its own must never hand the command to another app.
+        if frontAppOnly { pids = frontmost.map { [$0] } ?? [] }
 
         guard let onScreenWindowIDs = onScreenWindowIDs() else { return nil }
         for pid in pids {
@@ -381,30 +423,42 @@ final class WindowLayoutService: ObservableObject {
             // Bounded AX: a hung app in the MRU list must not stall the main
             // thread (and every event tap) for the default timeout.
             AXUIElementSetMessagingTimeout(axApp, 0.35)
-            for attribute in [kAXFocusedWindowAttribute, kAXMainWindowAttribute] {
-                if let window = windowAttribute(axApp, attribute as String),
-                   let target = target(from: window,
-                                       app: app,
-                                       onScreenWindowIDs: onScreenWindowIDs,
-                                       capability: capability) {
-                    return target
-                }
+            // The focused and main windows first, then the rest; each window
+            // is judged once even when it turns up under several names.
+            var judged = Set<CGWindowID>()
+            var windows = [kAXFocusedWindowAttribute, kAXMainWindowAttribute].compactMap {
+                windowAttribute(axApp, $0 as String)
             }
-            if let windows = windowsAttribute(axApp),
-               let first = windows.compactMap({ target(from: $0,
-                                                        app: app,
-                                                        onScreenWindowIDs: onScreenWindowIDs,
-                                                        capability: capability) }).first {
-                return first
+            var listedAll = false
+            var index = 0
+            while true {
+                if index == windows.count {
+                    guard !listedAll else { break }
+                    listedAll = true
+                    windows += windowsAttribute(axApp) ?? []
+                    if index == windows.count { break }
+                }
+                let window = windows[index]
+                index += 1
+                guard let candidate = candidate(from: window, app: app, onScreenWindowIDs: onScreenWindowIDs),
+                      judged.insert(candidate.key.windowID).inserted
+                else { continue }
+                switch judge(candidate) {
+                case .accept: return candidate.target
+                case .stop: return nil
+                case .skip: continue
+                }
             }
         }
         return nil
     }
 
-    private func target(from window: AXUIElement,
-                        app: NSRunningApplication,
-                        onScreenWindowIDs: Set<CGWindowID>,
-                        capability: WindowLayoutTargetCapability) -> WindowLayoutTarget? {
+    /// A window that could be acted on at all: a real, visible, unminimized
+    /// window of some size. What it lets Accessibility change is asked
+    /// separately, only for the capability a command needs.
+    private func candidate(from window: AXUIElement,
+                           app: NSRunningApplication,
+                           onScreenWindowIDs: Set<CGWindowID>) -> WindowLayoutCandidate? {
         guard role(of: window) == (kAXWindowRole as String),
               !boolAttribute(window, kAXMinimizedAttribute as String),
               stringAttribute(window, kAXSubroleAttribute as String) != "AXFloatingWindow",
@@ -414,24 +468,49 @@ final class WindowLayoutService: ObservableObject {
               frame.size.width > 80,
               frame.size.height > 80
         else { return nil }
-        let isFullScreen = boolAttribute(window, "AXFullScreen")
-        guard capability == .fullScreen || !isFullScreen else { return nil }
-        let hasRequiredCapability: Bool
-        switch capability {
-        case .position:
-            hasRequiredCapability = canSetPosition(on: window)
-        case .frame:
-            hasRequiredCapability = canSetFrame(on: window)
-        case .fullScreen:
-            hasRequiredCapability = canSetFullScreen(on: window)
-        }
-        guard hasRequiredCapability else { return nil }
         let key = WindowLayoutWindowKey(
             processID: app.processIdentifier,
             processLaunchTime: app.launchDate?.timeIntervalSinceReferenceDate ?? 0,
             windowID: windowID
         )
-        return WindowLayoutTarget(window: window, key: key, frame: frame)
+        return WindowLayoutCandidate(window: window, app: app, key: key, frame: frame,
+                                     isFullScreen: boolAttribute(window, "AXFullScreen"))
+    }
+
+    /// Whether a candidate lets Accessibility make the change a capability
+    /// names. Only Full Screen may act on a window in full screen.
+    private func supports(_ capability: WindowLayoutTargetCapability,
+                          _ candidate: WindowLayoutCandidate) -> Bool {
+        switch capability {
+        case .position:
+            return !candidate.isFullScreen && canSetPosition(on: candidate.window)
+        case .frame:
+            return !candidate.isFullScreen && canSetFrame(on: candidate.window)
+        case .fullScreen:
+            return canSetFullScreen(on: candidate.window)
+        }
+    }
+
+    private func target(from window: AXUIElement,
+                        app: NSRunningApplication,
+                        onScreenWindowIDs: Set<CGWindowID>,
+                        capability: WindowLayoutTargetCapability) -> WindowLayoutTarget? {
+        guard let candidate = candidate(from: window, app: app, onScreenWindowIDs: onScreenWindowIDs),
+              supports(capability, candidate)
+        else { return nil }
+        return candidate.target
+    }
+
+    /// The set of the display a window is on: vertical on a portrait one.
+    private func setKind(for frame: WindowLayoutFrame, screens: [NSScreen]) -> WindowCommandSetKind {
+        .forDisplay((bestScreen(for: frame, screens: screens) ?? NSScreen.main)?.frame ?? .zero)
+    }
+
+    /// The kinds of display connected right now, for the surfaces that print
+    /// a built-in's shortcut before any window is picked.
+    static func connectedSetKinds() -> Set<WindowCommandSetKind> {
+        let kinds = Set(NSScreen.screens.map { WindowCommandSetKind.forDisplay($0.frame) })
+        return kinds.isEmpty ? [.horizontal] : kinds
     }
 
     private func onScreenWindowIDs() -> Set<CGWindowID>? {
@@ -700,37 +779,61 @@ final class WindowLayoutService: ObservableObject {
         return nil
     }
 
-    /// A command shortcut fired. The set is the one of the display the front
-    /// window is on; a combination only the other set uses does nothing.
+    /// The Accessibility capability a command needs from its window.
+    private func capability(for command: WindowCommand,
+                            setKind: WindowCommandSetKind) -> WindowLayoutTargetCapability {
+        placementAction(for: command, grid: setKind.grid)?.targetCapability ?? .frame
+    }
+
+    /// A command shortcut fired. The window is looked up once, and the set
+    /// comes from the display that same window is on; a combination only the
+    /// other set uses does nothing. A window that cannot take the command (a
+    /// fixed-size one, for a placement that resizes) is passed over for the
+    /// next candidate, as every placement always did.
     fileprivate func runShortcut(slot: Int) {
         guard registeredShortcuts.indices.contains(slot) else { return }
         let shortcut = registeredShortcuts[slot]
-        let kind = focusedSetKind()
-        guard let command = WindowCommandShortcuts.command(for: shortcut, in: commands, setKind: kind) else {
+        guard AXIsProcessTrusted() else {
+            finish(.failure(.missingAccessibility))
             return
         }
-        apply(command, setKind: kind)
-    }
-
-    /// The set for the window in front: vertical when it sits on a portrait
-    /// display. Without a window, the display with the menu bar decides.
-    func focusedSetKind() -> WindowCommandSetKind {
-        if let target = focusedTarget(capability: .position),
-           let screen = bestScreen(for: target.frame) {
-            return .forDisplay(screen.frame)
+        let configuration = commands
+        let screens = NSScreen.screens
+        var chosen: (command: WindowCommand, kind: WindowCommandSetKind)?
+        var unusedHere = false
+        let resolved = focusedTarget(frontAppOnly: false) { candidate in
+            // A window that cannot even move never decides the set.
+            guard candidate.isFullScreen || supports(.position, candidate) else { return .skip }
+            let kind = setKind(for: candidate.frame, screens: screens)
+            guard let command = WindowCommandShortcuts.command(for: shortcut, in: configuration, setKind: kind) else {
+                unusedHere = true
+                return .stop
+            }
+            guard supports(capability(for: command, setKind: kind), candidate) else { return .skip }
+            chosen = (command, kind)
+            return .accept
         }
-        return .forDisplay(NSScreen.main?.frame ?? .zero)
+        guard let target = resolved, let chosen else {
+            if !unusedHere { finish(.failure(.noWindow)) }
+            return
+        }
+        guard !isIgnored(processID: target.key.processID) else { return }
+        _ = apply(chosen.command, setKind: chosen.kind, to: target, dropVisibleFrame: nil, historyFrame: nil,
+                  origin: .shortcut)
     }
 
-    /// Applies a command to the window in front, or to one given window (the
-    /// green-button menu's). Ignored apps are left alone without a message.
+    /// Applies a command chosen by name: from the menu-bar menu or the
+    /// green-button menu (which pass the window they were opened for), or
+    /// Settings' Try It (the window in front). A chosen command never takes
+    /// the keyboard's repeat rules. Ignored apps are left alone without a
+    /// message.
     @discardableResult
     func apply(_ command: WindowCommand,
                setKind: WindowCommandSetKind,
                window: AXUIElement? = nil) -> WindowLayoutResult {
         guard !command.isSeparator else { return .failure(.failed) }
         guard AXIsProcessTrusted() else { return finish(.failure(.missingAccessibility)) }
-        let capability = placementAction(for: command, grid: setKind.grid)?.targetCapability ?? .frame
+        let capability = capability(for: command, setKind: setKind)
         let target: WindowLayoutTarget?
         if let window {
             target = self.target(forWindow: window, capability: capability)
@@ -739,16 +842,19 @@ final class WindowLayoutService: ObservableObject {
         }
         guard let target else { return finish(.failure(.noWindow)) }
         guard !isIgnored(processID: target.key.processID) else { return .failure(.noWindow) }
-        return apply(command, setKind: setKind, to: target, dropVisibleFrame: nil, historyFrame: nil)
+        return apply(command, setKind: setKind, to: target, dropVisibleFrame: nil, historyFrame: nil,
+                     origin: .menu)
     }
 
     private func apply(_ command: WindowCommand,
                        setKind: WindowCommandSetKind,
                        to target: WindowLayoutTarget,
                        dropVisibleFrame: NSRect?,
-                       historyFrame: WindowLayoutFrame?) -> WindowLayoutResult {
+                       historyFrame: WindowLayoutFrame?,
+                       origin: WindowCommandOrigin) -> WindowLayoutResult {
         if let action = placementAction(for: command, grid: setKind.grid) {
-            return apply(action, to: target, dropVisibleFrame: dropVisibleFrame, historyFrame: historyFrame)
+            return apply(action, to: target, dropVisibleFrame: dropVisibleFrame, historyFrame: historyFrame,
+                         origin: origin)
         }
         guard case .area(let rect) = command.kind else { return finish(.failure(.failed)) }
         return applyArea(rect, grid: setKind.grid, to: target,
@@ -811,6 +917,13 @@ final class WindowLayoutService: ObservableObject {
 
     private func target(forWindow window: AXUIElement,
                         capability: WindowLayoutTargetCapability) -> WindowLayoutTarget? {
+        guard let candidate = candidate(forWindow: window), supports(capability, candidate) else { return nil }
+        return candidate.target
+    }
+
+    /// One given window (the green-button menu's, the menu-bar menu's) as a
+    /// candidate, nothing else considered.
+    private func candidate(forWindow window: AXUIElement) -> WindowLayoutCandidate? {
         var pid = pid_t(0)
         guard AXUIElementGetPid(window, &pid) == .success,
               let app = NSRunningApplication(processIdentifier: pid),
@@ -818,7 +931,7 @@ final class WindowLayoutService: ObservableObject {
               let onScreenWindowIDs = onScreenWindowIDs()
         else { return nil }
         AXUIElementSetMessagingTimeout(window, 0.35)
-        return target(from: window, app: app, onScreenWindowIDs: onScreenWindowIDs, capability: capability)
+        return candidate(from: window, app: app, onScreenWindowIDs: onScreenWindowIDs)
     }
 
     // MARK: Ignored apps
@@ -844,15 +957,36 @@ final class WindowLayoutService: ObservableObject {
     // MARK: Menu state
 
     /// What the menus need to know about the window a command would act on,
-    /// gathered once when a menu opens.
+    /// gathered once when a menu opens. The green-button menu passes the
+    /// window whose button was hovered; the menu-bar menu takes the app in
+    /// front and only that app's own window, never one from another app.
+    /// A window in full screen still counts, so Full Screen can bring it back.
     func menuContext(window: AXUIElement? = nil) -> WindowCommandMenuContext {
         let screens = NSScreen.screens
-        let resolved: WindowLayoutTarget?
+        var resolved: WindowLayoutCandidate?
         if AXIsProcessTrusted() {
-            resolved = window.flatMap { target(forWindow: $0, capability: .position) }
-                ?? (window == nil ? focusedTarget(capability: .position) : nil)
-        } else {
-            resolved = nil
+            let usable: (WindowLayoutCandidate) -> Bool = { candidate in
+                self.supports(.position, candidate) || (candidate.isFullScreen && self.supports(.fullScreen, candidate))
+            }
+            if let window {
+                resolved = candidate(forWindow: window).flatMap { usable($0) ? $0 : nil }
+            } else {
+                var found: WindowLayoutCandidate?
+                _ = focusedTarget(frontAppOnly: true) { candidate in
+                    guard usable(candidate) else { return .skip }
+                    found = candidate
+                    return .accept
+                }
+                resolved = found
+            }
+        }
+        var capabilities: WindowCommandCapabilities = []
+        if let resolved {
+            if !resolved.isFullScreen {
+                if canSetPosition(on: resolved.window) { capabilities.insert(.move) }
+                if canSetSize(on: resolved.window) { capabilities.insert(.resize) }
+            }
+            if canSetFullScreen(on: resolved.window) { capabilities.insert(.fullScreen) }
         }
         // Without a window of its own, the app in front is offered for the
         // ignore list only when it is an ordinary app (not a system agent
@@ -860,8 +994,7 @@ final class WindowLayoutService: ObservableObject {
         let frontmost = NSWorkspace.shared.frontmostApplication.flatMap {
             $0.activationPolicy == .regular ? $0 : nil
         }
-        let app = resolved.flatMap { NSRunningApplication(processIdentifier: $0.key.processID) }
-            ?? (window == nil ? frontmost : nil)
+        let app = resolved?.app ?? (window == nil ? frontmost : nil)
         let screen = resolved.flatMap { bestScreen(for: $0.frame, screens: screens) } ?? NSScreen.main
         let kind = WindowCommandSetKind.forDisplay(screen?.frame ?? .zero)
         var canRestore = false
@@ -875,12 +1008,15 @@ final class WindowLayoutService: ObservableObject {
                                         isIgnored: isIgnored(bundleID: app?.bundleIdentifier),
                                         displayCount: screens.count,
                                         canRestore: canRestore,
-                                        target: resolved,
+                                        capabilities: capabilities,
+                                        target: resolved?.target,
                                         screenFrame: screen?.frame,
                                         visibleFrame: screen?.visibleFrame)
     }
 
-    /// Whether a command would change the window, for greyed menu items.
+    /// Whether a command would change the window, for greyed menu items:
+    /// the window has to allow what the command changes (an area needs it to
+    /// resize, not only to move) and the result has to differ from now.
     func isAvailable(_ command: WindowCommand, in context: WindowCommandMenuContext) -> Bool {
         var current: CGRect?
         var targetFrame: CGRect?
@@ -902,7 +1038,8 @@ final class WindowLayoutService: ObservableObject {
                                                              displayCount: context.displayCount,
                                                              canRestore: context.canRestore,
                                                              currentFrame: current,
-                                                             targetFrame: targetFrame)
+                                                             targetFrame: targetFrame,
+                                                             capabilities: context.capabilities)
         return WindowCommandAvailability.isEnabled(command.kind, context: availability)
     }
 
@@ -1027,6 +1164,8 @@ final class WindowLayoutService: ObservableObject {
     private func beginDirectionalGesture() {
         guard directionalSession == nil,
               let target = focusedTarget(for: .leftHalf),
+              // Ignored apps are left alone here too.
+              !isIgnored(processID: target.key.processID),
               let screen = bestScreen(for: target.frame) else { return }
         directionalSession = WindowDirectionalSession(target: target,
                                                       visibleFrame: screen.visibleFrame,
@@ -1695,7 +1834,8 @@ final class WindowLayoutService: ObservableObject {
                   setKind: target.setKind,
                   to: layoutTarget,
                   dropVisibleFrame: target.visibleFrame,
-                  historyFrame: history)
+                  historyFrame: history,
+                  origin: .drop)
     }
 
     /// Gives a window Window Layout snapped its earlier size back as soon as
@@ -2177,6 +2317,8 @@ final class WindowLayoutService: ObservableObject {
               let app = NSRunningApplication(processIdentifier: pid),
               !app.isTerminated,
               app.activationPolicy == .regular,
+              // Ignored apps keep their modifier clicks and drags.
+              !isIgnored(bundleID: app.bundleIdentifier),
               let frame = frame(of: window),
               frame.size.width > 80,
               frame.size.height > 80
@@ -2358,6 +2500,27 @@ private struct WindowLayoutTarget {
     let frame: WindowLayoutFrame
 
     var windowID: CGWindowID { key.windowID }
+}
+
+/// A window the lookup could act on, with what it already read about it.
+private struct WindowLayoutCandidate {
+    let window: AXUIElement
+    let app: NSRunningApplication
+    let key: WindowLayoutWindowKey
+    let frame: WindowLayoutFrame
+    let isFullScreen: Bool
+
+    var target: WindowLayoutTarget { WindowLayoutTarget(window: window, key: key, frame: frame) }
+}
+
+/// What the lookup does with a candidate window.
+private enum WindowCandidateVerdict {
+    /// Act on this window.
+    case accept
+    /// This window cannot take the command; try the next one.
+    case skip
+    /// The command does not apply here: act on nothing.
+    case stop
 }
 
 private struct WindowDirectionalSession {
@@ -2862,9 +3025,14 @@ struct WindowCommandMenuContext {
     let isIgnored: Bool
     let displayCount: Int
     let canRestore: Bool
+    /// What the window lets Accessibility change.
+    let capabilities: WindowCommandCapabilities
     fileprivate let target: WindowLayoutTarget?
     let screenFrame: CGRect?
     let visibleFrame: CGRect?
 
     var hasWindow: Bool { target != nil }
+
+    /// The window the menu was opened for, which its commands act on.
+    var window: AXUIElement? { target?.window }
 }
