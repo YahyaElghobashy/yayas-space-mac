@@ -751,5 +751,62 @@ enum WindowCommandTests {
         expect(Sync.decide(localModifiedAt: 30, fileModifiedAt: 25, lastSyncedAt: 10) == (.writeLocal, true)
                 && Sync.decide(localModifiedAt: 25, fileModifiedAt: 30, lastSyncedAt: 10) == (.adoptFile, true),
                "when both changed since the last sync the newer still wins and a conflict is noted")
+
+        // The real last change, 0 when this Mac never changed anything.
+        expect(Sync.decide(localModifiedAt: 0, fileModifiedAt: 20, lastSyncedAt: 0) == (.adoptFile, false),
+               "a fresh Mac takes the folder's file without a conflict note")
+        expect(Sync.decide(localModifiedAt: 0, fileModifiedAt: nil, lastSyncedAt: 0) == (.writeLocal, false)
+                && Sync.decide(localModifiedAt: 0, fileModifiedAt: 0, lastSyncedAt: 0) == (.none, false)
+                && Sync.decide(localModifiedAt: 12, fileModifiedAt: 0, lastSyncedAt: 0) == (.writeLocal, false),
+               "an untouched setup is dated never-changed, so any real change on another Mac outranks it")
+        expect(Sync.decide(localModifiedAt: 30, fileModifiedAt: 25, lastSyncedAt: 0) == (.writeLocal, false)
+                && Sync.decide(localModifiedAt: 25, fileModifiedAt: 30, lastSyncedAt: 0) == (.adoptFile, false),
+               "a folder just chosen starts a new history: the newer side wins without a conflict note")
+
+        expect(Sync.fileName == "Yayas Space Window Layout.json",
+               "the sync file has one fixed name")
+        let controllerSource = (try? String(
+            contentsOfFile: "Sources/YayasSpace/Services/WindowLayout/WindowLayoutSyncController.swift",
+            encoding: .utf8)) ?? ""
+        expect(controllerSource.contains("appendingPathComponent(WindowLayoutSyncSupport.fileName)")
+                && controllerSource.contains("nameFieldStringValue = WindowLayoutSyncSupport.fileName"),
+               "the sync folder and Export both use the fixed file name, never a translated one")
+
+        let observed = Set(Sync.observedKeys)
+        expect(observed.isSuperset(of: Sync.syncedKeys.map(\.key))
+                && observed.contains(DefaultsKey.windowLayoutCommands)
+                && observed.isDisjoint(with: [DefaultsKey.windowLayoutSettingsModifiedAt,
+                                              DefaultsKey.windowLayoutSyncedAt,
+                                              DefaultsKey.windowLayoutSyncFolder,
+                                              DefaultsKey.windowLayoutSyncNote]),
+               "the change check watches the synced keys and the command sets, never the sync clock it stamps")
+        let observerSuite = "yayasspace.tests.windowCommands.observer"
+        let observerDefaults = UserDefaults(suiteName: observerSuite)!
+        observerDefaults.removePersistentDomain(forName: observerSuite)
+        var reported = 0
+        var observer: WindowLayoutDefaultsObserver? = WindowLayoutDefaultsObserver(
+            defaults: observerDefaults, keys: [DefaultsKey.windowLayoutWindowGap]) { reported += 1 }
+        observerDefaults.set(true, forKey: DefaultsKey.dockClickCycleWindows)
+        let afterOtherKey = reported
+        observerDefaults.set(24, forKey: DefaultsKey.windowLayoutWindowGap)
+        expect(observer != nil && afterOtherKey == 0 && reported == 1,
+               "a write to another preference never wakes the change check; a synced key does")
+        observer = nil
+        observerDefaults.set(8, forKey: DefaultsKey.windowLayoutWindowGap)
+        expect(reported == 1, "a stopped observer reports nothing")
+        observerDefaults.removePersistentDomain(forName: observerSuite)
+
+        expect(Sync.readiness(exists: false, isDataless: false, isUbiquitous: false, downloadStatus: nil) == .missing
+                && Sync.readiness(exists: true, isDataless: false, isUbiquitous: false, downloadStatus: nil) == .ready
+                && Sync.readiness(exists: true, isDataless: false, isUbiquitous: true,
+                                  downloadStatus: .current) == .ready,
+               "a local file, or a cloud file that is fully downloaded, is read")
+        expect(Sync.readiness(exists: true, isDataless: true, isUbiquitous: false, downloadStatus: nil)
+                == .waitingForDownload
+                && Sync.readiness(exists: true, isDataless: false, isUbiquitous: true,
+                                  downloadStatus: .notDownloaded) == .waitingForDownload
+                && Sync.readiness(exists: true, isDataless: false, isUbiquitous: true,
+                                  downloadStatus: .downloaded) == .waitingForDownload,
+               "a placeholder or a stale cloud copy is skipped until it is downloaded, never waited on")
     }
 }

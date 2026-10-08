@@ -35,7 +35,7 @@ struct WindowCommandStrings {
     let importFailed: String
     let exportFailed: String
     let syncFolderUnavailable: String
-    let syncFileName: String
+    let syncWaitingForDownload: String
 
     // General
     let generalSection: String
@@ -187,7 +187,7 @@ struct WindowCommandStrings {
         importFailed: "That file holds no window layout settings.",
         exportFailed: "The file could not be written.",
         syncFolderUnavailable: "The sync folder cannot be read. Choose it again.",
-        syncFileName: "Yayas Space Window Layout.json",
+        syncWaitingForDownload: "Waiting for the sync file to download to this Mac.",
         generalSection: "General",
         showMenuBarItem: "Show the Window Layout menu bar icon",
         showMenuBarItemCaption: "A second icon, next to Yaya's Space’s own, lists every command for the window in front.",

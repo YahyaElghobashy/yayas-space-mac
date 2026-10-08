@@ -13,6 +13,11 @@ enum WindowLayoutSyncSupport {
     static let format = "yayasspace.window-layout"
     static let version = 1
 
+    /// The file's name in the sync folder, and the name Export suggests.
+    /// Fixed and never translated: two Macs set to different languages must
+    /// still read and write the same file.
+    static let fileName = "Yayas Space Window Layout.json"
+
     enum ValueType {
         case bool
         case integer
@@ -47,6 +52,13 @@ enum WindowLayoutSyncSupport {
         (DefaultsKey.panelUtilityWindowLayout, .bool),
         (DefaultsKey.windowLayoutHiddenActions, .string),
     ]
+
+    /// The preferences whose changes count as a settings change: every
+    /// synced key plus the command sets. The sync clock and folder are left
+    /// out on purpose, or stamping a change would itself look like one.
+    static var observedKeys: [String] {
+        syncedKeys.map(\.key) + [DefaultsKey.windowLayoutCommands]
+    }
 
     struct Document: Equatable {
         var modifiedAt: TimeInterval
@@ -154,17 +166,44 @@ enum WindowLayoutSyncSupport {
         case writeLocal
     }
 
-    /// Last writer wins. A conflict is when both sides changed since the
-    /// last sync; the newer one still wins, and the caller leaves a note.
+    /// Last writer wins. `localModifiedAt` is the real time of this Mac's
+    /// last change, 0 when nothing was ever changed here, so an untouched
+    /// setup never outranks a file someone did change. A conflict is when
+    /// both sides changed since a sync this Mac already made with the folder;
+    /// the newer one still wins, and the caller leaves a note. A fresh Mac,
+    /// or a folder just chosen, has no such sync yet and so no conflict.
     static func decide(localModifiedAt: TimeInterval,
                        fileModifiedAt: TimeInterval?,
                        lastSyncedAt: TimeInterval,
                        tolerance: TimeInterval = 0.5) -> (decision: Decision, conflict: Bool) {
         guard let fileModifiedAt else { return (.writeLocal, false) }
         if abs(fileModifiedAt - localModifiedAt) <= tolerance { return (.none, false) }
+        let hasSyncedBefore = lastSyncedAt > 0
         let localChanged = localModifiedAt > lastSyncedAt + tolerance
         let fileChanged = fileModifiedAt > lastSyncedAt + tolerance
-        let conflict = localChanged && fileChanged
+        let conflict = hasSyncedBefore && localChanged && fileChanged
         return (fileModifiedAt > localModifiedAt ? .adoptFile : .writeLocal, conflict)
+    }
+
+    /// Whether the folder's file can be read right now without waiting.
+    enum FileReadiness: Equatable {
+        case missing
+        case ready
+        /// A cloud placeholder, or a copy older than the cloud's: reading it
+        /// would wait for the folder's own client to download it.
+        case waitingForDownload
+    }
+
+    /// Decided from what the file system says without opening the file. A
+    /// dataless file (any cloud provider's placeholder) or a ubiquitous item
+    /// whose download status is not current is left alone until it is.
+    static func readiness(exists: Bool,
+                          isDataless: Bool,
+                          isUbiquitous: Bool,
+                          downloadStatus: URLUbiquitousItemDownloadingStatus?) -> FileReadiness {
+        guard exists else { return .missing }
+        if isDataless { return .waitingForDownload }
+        if isUbiquitous, let downloadStatus, downloadStatus != .current { return .waitingForDownload }
+        return .ready
     }
 }

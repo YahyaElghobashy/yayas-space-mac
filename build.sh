@@ -423,6 +423,7 @@ if (( TEST )); then
         Sources/YayasSpace/Services/WindowLayout/WindowCommandSupport.swift \
         Sources/YayasSpace/Services/WindowLayout/WindowCommandStore.swift \
         Sources/YayasSpace/Services/WindowLayout/WindowLayoutSyncSupport.swift \
+        Sources/YayasSpace/Services/WindowLayout/WindowLayoutDefaultsObserver.swift \
         Sources/YayasSpace/Core/WindowCommandStrings.swift \
         Sources/YayasSpace/Core/WindowDirectionalStrings.swift \
         Sources/YayasSpace/Services/CleaningMode/CleaningUnlockCounter.swift \

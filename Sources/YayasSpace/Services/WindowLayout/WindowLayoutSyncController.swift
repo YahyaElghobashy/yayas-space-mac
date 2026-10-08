@@ -7,9 +7,15 @@ import UniformTypeIdentifiers
 
 /// Export, import and the optional sync folder for Window Layout settings.
 /// The folder is any folder another program keeps in step between Macs
-/// (iCloud Drive, Dropbox); this app only reads one file there at launch and
-/// writes it after changes. Last writer wins, and when both sides changed
-/// since the last sync a note says which copy was kept.
+/// (iCloud Drive, Dropbox); this app only reads one file there a few seconds
+/// after launch and writes it after changes. Last writer wins, and when both
+/// sides changed since the last sync a note says which copy was kept.
+///
+/// Every file read and write runs on one serial background queue: the folder
+/// can sit on a cloud drive whose file is still downloading, and a
+/// coordinated read of such a file waits for the download. Only applying the
+/// preferences a file brings hops back to the main thread. A file that is not
+/// downloaded yet is skipped with a note instead of being waited for.
 final class WindowLayoutSyncController: ObservableObject {
     static let shared = WindowLayoutSyncController()
 
@@ -19,16 +25,56 @@ final class WindowLayoutSyncController: ObservableObject {
     @Published private(set) var statusMessage: String?
     @Published private(set) var statusIsError = false
 
-    private var observer: NSObjectProtocol?
+    /// How long after the feature starts the first folder sync waits, so it
+    /// never runs during launch or inside a preference sync.
+    private static let firstSyncDelay: TimeInterval = 4
+    /// A burst of writes (an import touches many keys) is checked once.
+    private static let changeDebounce: TimeInterval = 0.5
+    /// A change reaches the folder this long after the last edit.
+    private static let writeDelay: TimeInterval = 1
+    /// While the folder's file is still downloading, look again this often,
+    /// a limited number of times; Sync Now, a change or the next launch
+    /// start over.
+    private static let downloadRetryDelay: TimeInterval = 30
+    private static let downloadRetryLimit = 20
+
+    private let io = DispatchQueue(label: "com.yahyaelghobashy.yayasspace.window-layout-sync", qos: .utility)
+    private var keyObserver: WindowLayoutDefaultsObserver?
+    private var isActive = false
     private var lastSnapshot: Snapshot?
-    private var checkScheduled = false
-    private var pendingWrite: DispatchWorkItem?
+    private var pendingCheck: DispatchWorkItem?
+    private var pendingSync: DispatchWorkItem?
+    private var syncInFlight = false
+    private var syncRequestedAgain = false
+    private var downloadRetries = 0
+    /// Whether the status line shows a sync result (a later good sync clears
+    /// it) rather than the result of an export or import.
+    private var statusFromSync = false
 
     /// What a change is measured against: every synced preference and the
     /// command sets' stored text.
     private struct Snapshot: Equatable {
         let settings: [String: WindowLayoutSyncSupport.SyncValue]
         let commands: String
+    }
+
+    /// Everything a folder sync needs, gathered on the main thread so the
+    /// background work never touches app state.
+    private struct FolderSyncRequest {
+        let fileURL: URL
+        /// The real time of this Mac's last change; 0 when never changed.
+        let localModifiedAt: TimeInterval
+        let lastSyncedAt: TimeInterval
+        let local: WindowLayoutSyncSupport.Document
+    }
+
+    private enum FolderSyncOutcome {
+        case inStep(baseline: TimeInterval)
+        case wrote(baseline: TimeInterval, conflictWith: String?)
+        case adopt(WindowLayoutSyncSupport.Document, conflict: Bool)
+        case waitingForDownload
+        case unavailable
+        case writeFailed
     }
 
     private init() {
@@ -45,48 +91,61 @@ final class WindowLayoutSyncController: ObservableObject {
 
     // MARK: Lifecycle
 
-    /// Starts watching for changes (and reads the sync folder once) while the
-    /// feature is installed; stops when it is not.
+    /// Starts watching the synced preferences while the feature is installed
+    /// and schedules one folder sync a few seconds later; stops when it is
+    /// not. Cheap and idempotent, because the engine calls it on every
+    /// preference sync: it never reads or writes a file itself.
     func sync(active: Bool) {
         if active {
-            guard observer == nil else { return }
+            guard !isActive else { return }
+            isActive = true
             lastSnapshot = currentSnapshot()
-            observer = NotificationCenter.default.addObserver(forName: UserDefaults.didChangeNotification,
-                                                              object: nil,
-                                                              queue: .main) { [weak self] _ in
+            keyObserver = WindowLayoutDefaultsObserver(keys: WindowLayoutSyncSupport.observedKeys) { [weak self] in
                 self?.scheduleChangeCheck()
             }
-            syncWithFolder(onLaunch: true)
+            scheduleFolderSync(after: Self.firstSyncDelay)
         } else {
-            if let observer { NotificationCenter.default.removeObserver(observer) }
-            observer = nil
-            pendingWrite?.cancel()
-            pendingWrite = nil
+            guard isActive else { return }
+            isActive = false
+            keyObserver = nil
+            pendingCheck?.cancel()
+            pendingCheck = nil
+            pendingSync?.cancel()
+            pendingSync = nil
         }
     }
 
-    /// A burst of preference writes (an import touches many) collapses into
-    /// one check on the next turn of the run loop.
+    /// Key-value observing reports on the writing thread; the check itself
+    /// runs on the main thread once the writes have settled.
     private func scheduleChangeCheck() {
-        guard !checkScheduled else { return }
-        checkScheduled = true
         DispatchQueue.main.async { [weak self] in
-            guard let self else { return }
-            self.checkScheduled = false
-            self.checkForChange()
+            guard let self, self.isActive else { return }
+            self.pendingCheck?.cancel()
+            let work = DispatchWorkItem { [weak self] in self?.checkForChange() }
+            self.pendingCheck = work
+            DispatchQueue.main.asyncAfter(deadline: .now() + Self.changeDebounce, execute: work)
         }
     }
 
     private func checkForChange() {
+        pendingCheck = nil
         let snapshot = currentSnapshot()
         guard snapshot != lastSnapshot else { return }
         lastSnapshot = snapshot
         UserDefaults.standard.set(Date().timeIntervalSince1970, forKey: DefaultsKey.windowLayoutSettingsModifiedAt)
         guard folderURL != nil else { return }
-        pendingWrite?.cancel()
-        let work = DispatchWorkItem { [weak self] in self?.syncWithFolder(onLaunch: false) }
-        pendingWrite = work
-        DispatchQueue.main.asyncAfter(deadline: .now() + 1, execute: work)
+        downloadRetries = 0
+        scheduleFolderSync(after: Self.writeDelay)
+    }
+
+    private func scheduleFolderSync(after delay: TimeInterval) {
+        pendingSync?.cancel()
+        let work = DispatchWorkItem { [weak self] in
+            self?.pendingSync = nil
+            self?.requestFolderSync()
+        }
+        pendingSync = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + delay, execute: work)
     }
 
     private func currentSnapshot() -> Snapshot {
@@ -101,7 +160,7 @@ final class WindowLayoutSyncController: ObservableObject {
     }
 
     private var fileURL: URL? {
-        folderURL?.appendingPathComponent(strings.syncFileName)
+        folderURL?.appendingPathComponent(WindowLayoutSyncSupport.fileName)
     }
 
     var folderDisplayPath: String? {
@@ -126,16 +185,19 @@ final class WindowLayoutSyncController: ObservableObject {
         NSApp.activate(ignoringOtherApps: true)
         guard panel.runModal() == .OK, let url = panel.url else { return }
         setFolder(url.path)
-        syncWithFolder(onLaunch: true)
+        downloadRetries = 0
+        requestFolderSync()
     }
 
     func stopSyncing() {
         setFolder(nil)
         dismissConflictNote()
+        if statusFromSync { clearStatus() }
     }
 
     func syncNow() {
-        syncWithFolder(onLaunch: true)
+        downloadRetries = 0
+        requestFolderSync()
     }
 
     func dismissConflictNote() {
@@ -147,12 +209,16 @@ final class WindowLayoutSyncController: ObservableObject {
         folderPath = path
         UserDefaults.standard.set(path ?? "", forKey: DefaultsKey.windowLayoutSyncFolder)
         // A new folder starts a new history: nothing has been synced to it.
-        setSyncedAt(nil)
+        UserDefaults.standard.set(0.0, forKey: DefaultsKey.windowLayoutSyncedAt)
+        lastSyncedAt = nil
     }
 
-    private func setSyncedAt(_ time: TimeInterval?) {
-        lastSyncedAt = time.map { Date(timeIntervalSince1970: $0) }
-        UserDefaults.standard.set(time ?? 0, forKey: DefaultsKey.windowLayoutSyncedAt)
+    /// Notes a finished sync: the change time both sides now share, which
+    /// the next sync measures changes against, and when it happened.
+    private func recordSync(baseline: TimeInterval) {
+        UserDefaults.standard.set(baseline, forKey: DefaultsKey.windowLayoutSyncedAt)
+        lastSyncedAt = Date()
+        if statusFromSync { clearStatus() }
     }
 
     private func setConflictNote(_ note: String?) {
@@ -161,50 +227,111 @@ final class WindowLayoutSyncController: ObservableObject {
     }
 
     /// Reads the folder's file and takes it when newer, or writes this Mac's
-    /// settings when they are newer or the file does not exist yet.
-    private func syncWithFolder(onLaunch: Bool) {
-        guard let fileURL else { return }
-        let defaults = UserDefaults.standard
-        var localModifiedAt = defaults.double(forKey: DefaultsKey.windowLayoutSettingsModifiedAt)
-        if localModifiedAt == 0 {
-            // Never changed since the command sets arrived: date the setup now
-            // so a file from another Mac that is older does not replace it.
-            localModifiedAt = onLaunch ? 1 : Date().timeIntervalSince1970
-        }
-        let lastSynced = defaults.double(forKey: DefaultsKey.windowLayoutSyncedAt)
-        let document = readDocument(at: fileURL)
-        if FileManager.default.fileExists(atPath: fileURL.path), document == nil {
-            showStatus(strings.syncFolderUnavailable, isError: true)
+    /// settings when they are newer or the file does not exist yet. Gathers
+    /// its inputs here, does the file work on the background queue and
+    /// comes back to apply the result. One sync at a time; a request made
+    /// while one runs is served right after it.
+    private func requestFolderSync() {
+        guard isActive, let fileURL else { return }
+        if syncInFlight {
+            syncRequestedAgain = true
             return
         }
-        let (decision, conflict) = WindowLayoutSyncSupport.decide(localModifiedAt: localModifiedAt,
+        syncInFlight = true
+        let defaults = UserDefaults.standard
+        let localModifiedAt = defaults.double(forKey: DefaultsKey.windowLayoutSettingsModifiedAt)
+        let request = FolderSyncRequest(fileURL: fileURL,
+                                        localModifiedAt: localModifiedAt,
+                                        lastSyncedAt: defaults.double(forKey: DefaultsKey.windowLayoutSyncedAt),
+                                        local: localDocument(modifiedAt: localModifiedAt))
+        io.async { [weak self] in
+            let outcome = Self.performFolderSync(request)
+            DispatchQueue.main.async { self?.finishFolderSync(outcome, request: request) }
+        }
+    }
+
+    /// Background queue only: never touches the controller or the store.
+    private static func performFolderSync(_ request: FolderSyncRequest) -> FolderSyncOutcome {
+        let fileURL = request.fileURL
+        var isDirectory: ObjCBool = false
+        guard FileManager.default.fileExists(atPath: fileURL.deletingLastPathComponent().path,
+                                             isDirectory: &isDirectory),
+              isDirectory.boolValue
+        else { return .unavailable }
+
+        let document: WindowLayoutSyncSupport.Document?
+        switch readiness(of: fileURL) {
+        case .waitingForDownload:
+            return .waitingForDownload
+        case .missing:
+            document = nil
+        case .ready:
+            guard let read = readDocument(at: fileURL) else { return .unavailable }
+            document = read
+        }
+        let (decision, conflict) = WindowLayoutSyncSupport.decide(localModifiedAt: request.localModifiedAt,
                                                                   fileModifiedAt: document?.modifiedAt,
-                                                                  lastSyncedAt: lastSynced)
+                                                                  lastSyncedAt: request.lastSyncedAt)
         switch decision {
         case .none:
-            setSyncedAt(localModifiedAt)
+            return .inStep(baseline: request.localModifiedAt)
         case .adoptFile:
-            guard let document else { return }
+            guard let document else { return .unavailable }
+            return .adopt(document, conflict: conflict)
+        case .writeLocal:
+            guard write(request.local, to: fileURL) else { return .writeFailed }
+            let otherDevice = document.map { $0.device.isEmpty ? "?" : $0.device }
+            return .wrote(baseline: request.localModifiedAt, conflictWith: conflict ? otherDevice : nil)
+        }
+    }
+
+    private func finishFolderSync(_ outcome: FolderSyncOutcome, request: FolderSyncRequest) {
+        syncInFlight = false
+        defer {
+            if syncRequestedAgain {
+                syncRequestedAgain = false
+                requestFolderSync()
+            }
+        }
+        // The folder was changed or dropped while the file work ran: the
+        // result belongs to a folder this Mac no longer syncs with.
+        guard request.fileURL == fileURL else { return }
+        let defaults = UserDefaults.standard
+        if case .waitingForDownload = outcome {} else { downloadRetries = 0 }
+        switch outcome {
+        case .inStep(let baseline):
+            recordSync(baseline: baseline)
+        case .wrote(let baseline, let otherDevice):
+            recordSync(baseline: baseline)
+            if let otherDevice {
+                setConflictNote(String(format: strings.syncConflictFormat, otherDevice, Self.deviceName))
+            }
+        case .adopt(let document, let conflict):
+            // Something changed here while the file was being read: this
+            // Mac's change is the newer one now, so sync again instead.
+            guard isActive,
+                  defaults.double(forKey: DefaultsKey.windowLayoutSettingsModifiedAt) == request.localModifiedAt
+            else {
+                syncRequestedAgain = true
+                break
+            }
             apply(document)
             defaults.set(document.modifiedAt, forKey: DefaultsKey.windowLayoutSettingsModifiedAt)
-            setSyncedAt(document.modifiedAt)
+            recordSync(baseline: document.modifiedAt)
             if conflict {
-                setConflictNote(String(format: strings.syncConflictFormat,
-                                       document.device.isEmpty ? "?" : document.device,
-                                       document.device.isEmpty ? "?" : document.device))
+                let device = document.device.isEmpty ? "?" : document.device
+                setConflictNote(String(format: strings.syncConflictFormat, device, device))
             }
-        case .writeLocal:
-            let written = max(localModifiedAt, 1)
-            guard write(to: fileURL, modifiedAt: written) else {
-                showStatus(strings.exportFailed, isError: true)
-                return
+        case .waitingForDownload:
+            showStatus(strings.syncWaitingForDownload, isError: false, fromSync: true)
+            if downloadRetries < Self.downloadRetryLimit, pendingSync == nil {
+                downloadRetries += 1
+                scheduleFolderSync(after: Self.downloadRetryDelay)
             }
-            setSyncedAt(written)
-            if conflict, let document {
-                setConflictNote(String(format: strings.syncConflictFormat,
-                                       document.device.isEmpty ? "?" : document.device,
-                                       Self.deviceName))
-            }
+        case .unavailable:
+            showStatus(strings.syncFolderUnavailable, isError: true, fromSync: true)
+        case .writeFailed:
+            showStatus(strings.exportFailed, isError: true, fromSync: true)
         }
     }
 
@@ -212,16 +339,20 @@ final class WindowLayoutSyncController: ObservableObject {
 
     func exportWithPanel() {
         let panel = NSSavePanel()
-        panel.nameFieldStringValue = strings.syncFileName
+        panel.nameFieldStringValue = WindowLayoutSyncSupport.fileName
         panel.allowedContentTypes = [.json]
         panel.canCreateDirectories = true
         NSApp.activate(ignoringOtherApps: true)
         guard panel.runModal() == .OK, let url = panel.url else { return }
         let modifiedAt = UserDefaults.standard.double(forKey: DefaultsKey.windowLayoutSettingsModifiedAt)
-        if write(to: url, modifiedAt: modifiedAt > 0 ? modifiedAt : Date().timeIntervalSince1970) {
-            showStatus(strings.exported, isError: false)
-        } else {
-            showStatus(strings.exportFailed, isError: true)
+        let document = localDocument(modifiedAt: modifiedAt > 0 ? modifiedAt : Date().timeIntervalSince1970)
+        io.async { [weak self] in
+            let written = Self.write(document, to: url)
+            DispatchQueue.main.async {
+                guard let self else { return }
+                self.showStatus(written ? self.strings.exported : self.strings.exportFailed,
+                                isError: !written, fromSync: false)
+            }
         }
     }
 
@@ -231,8 +362,15 @@ final class WindowLayoutSyncController: ObservableObject {
         panel.allowsMultipleSelection = false
         NSApp.activate(ignoringOtherApps: true)
         guard panel.runModal() == .OK, let url = panel.url else { return }
-        guard let document = readDocument(at: url) else {
-            showStatus(strings.importFailed, isError: true)
+        io.async { [weak self] in
+            let document = Self.readDocument(at: url)
+            DispatchQueue.main.async { self?.finishImport(document) }
+        }
+    }
+
+    private func finishImport(_ document: WindowLayoutSyncSupport.Document?) {
+        guard let document else {
+            showStatus(strings.importFailed, isError: true, fromSync: false)
             return
         }
         // An import is a change made here: it dates itself now and goes on
@@ -240,9 +378,10 @@ final class WindowLayoutSyncController: ObservableObject {
         apply(document)
         lastSnapshot = nil
         scheduleChangeCheck()
-        showStatus(strings.imported, isError: false)
+        showStatus(strings.imported, isError: false, fromSync: false)
     }
 
+    /// Main thread: preferences and the live command sets.
     private func apply(_ document: WindowLayoutSyncSupport.Document) {
         WindowLayoutSyncSupport.apply(document.settings, to: .standard)
         if let commands = document.commands {
@@ -254,14 +393,44 @@ final class WindowLayoutSyncController: ObservableObject {
         WindowLayoutService.shared.syncWithPreferences()
     }
 
-    private func showStatus(_ message: String, isError: Bool) {
-        statusMessage = message
-        statusIsError = isError
+    /// This Mac's settings as a file, read on the main thread.
+    private func localDocument(modifiedAt: TimeInterval) -> WindowLayoutSyncSupport.Document {
+        WindowLayoutSyncSupport.Document(modifiedAt: modifiedAt,
+                                         device: Self.deviceName,
+                                         settings: WindowLayoutSyncSupport.snapshot(of: .standard),
+                                         commands: WindowCommandStore.shared.configuration)
     }
 
-    // MARK: Files
+    private func showStatus(_ message: String, isError: Bool, fromSync: Bool) {
+        statusMessage = message
+        statusIsError = isError
+        statusFromSync = fromSync
+    }
 
-    private func readDocument(at url: URL) -> WindowLayoutSyncSupport.Document? {
+    private func clearStatus() {
+        statusMessage = nil
+        statusIsError = false
+        statusFromSync = false
+    }
+
+    // MARK: Files (background queue)
+
+    /// Asks the file system, without opening the file, whether reading it
+    /// would have to wait for a download.
+    private static func readiness(of url: URL) -> WindowLayoutSyncSupport.FileReadiness {
+        var info = stat()
+        let exists = lstat(url.path, &info) == 0
+        // SF_DATALESS: a placeholder whose content lives with a cloud provider.
+        let isDataless = exists && (info.st_flags & 0x4000_0000) != 0
+        let values = try? url.resourceValues(forKeys: [.isUbiquitousItemKey,
+                                                       .ubiquitousItemDownloadingStatusKey])
+        return WindowLayoutSyncSupport.readiness(exists: exists,
+                                                 isDataless: isDataless,
+                                                 isUbiquitous: values?.isUbiquitousItem ?? false,
+                                                 downloadStatus: values?.ubiquitousItemDownloadingStatus)
+    }
+
+    private static func readDocument(at url: URL) -> WindowLayoutSyncSupport.Document? {
         var result: WindowLayoutSyncSupport.Document?
         var coordinationError: NSError?
         NSFileCoordinator(filePresenter: nil).coordinate(readingItemAt: url, options: [],
@@ -272,12 +441,7 @@ final class WindowLayoutSyncController: ObservableObject {
         return result
     }
 
-    private func write(to url: URL, modifiedAt: TimeInterval) -> Bool {
-        let document = WindowLayoutSyncSupport.Document(
-            modifiedAt: modifiedAt,
-            device: Self.deviceName,
-            settings: WindowLayoutSyncSupport.snapshot(of: .standard),
-            commands: WindowCommandStore.shared.configuration)
+    private static func write(_ document: WindowLayoutSyncSupport.Document, to url: URL) -> Bool {
         guard let data = WindowLayoutSyncSupport.encode(document) else { return false }
         var written = false
         var coordinationError: NSError?
