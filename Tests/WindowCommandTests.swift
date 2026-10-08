@@ -653,6 +653,46 @@ enum WindowCommandTests {
                 && !WindowRestoreOnDrag.isStillSnapped(current: CGRect(x: 0, y: 25, width: 900, height: 875),
                                                        placed: snapped),
                "only a window still in its snapped frame is restored; a hand-resized one keeps its size")
+
+        // The drag listener: drops need snapping, restoring needs only a
+        // placed window, whichever route placed it.
+        func gate(available: Bool = true, trusted: Bool = true, snapping: Bool = false, areas: Bool = true,
+                  tiling: Bool = false, restore: Bool = true, placed: Bool = true) -> WindowDragTracking {
+            WindowDragTracking.resolve(featureAvailable: available, trusted: trusted, snappingEnabled: snapping,
+                                       hasLiveDragAreas: areas, systemTilingEnabled: tiling,
+                                       restoreSizeEnabled: restore, hasPlacedWindows: placed)
+        }
+        expect(gate().listens && gate().restoresSize && !gate().placesOnDrop,
+               "with drag snapping off the listener still runs to give a placed window its size back")
+        expect(!gate(placed: false).listens && !gate(restore: false).listens,
+               "with snapping off it runs only while restoring is on and a placed window is remembered")
+        expect(gate(snapping: true, restore: false).placesOnDrop
+                && gate(snapping: true, placed: false).listens
+                && !gate(snapping: true, areas: false, restore: false).listens,
+               "snapping listens whenever some command has a live drag area")
+        expect(!gate(snapping: true, tiling: true).placesOnDrop && gate(snapping: true, tiling: true).restoresSize,
+               "the system's own tiling takes the drops but never the restoring")
+        expect(gate(available: false) == .off && gate(trusted: false) == .off,
+               "nothing listens without the feature or its permission")
+        expect(gate().tracksPress(onPlacedWindow: true) && !gate().tracksPress(onPlacedWindow: false)
+                && gate(snapping: true, placed: false).tracksPress(onPlacedWindow: false),
+               "with only restoring to do, a press is followed only on a window Window Layout placed")
+        let settingsSource = (try? String(contentsOfFile: "Sources/YayasSpace/UI/Settings/WindowLayoutSettings.swift",
+                                          encoding: .utf8)) ?? ""
+        let restoreToggle = settingsSource.components(separatedBy: "Toggle(text.restoreOnDrag").dropFirst().first?
+            .components(separatedBy: "Text(text.restoreOnDragCaption").first ?? ".disabled("
+        expect(!settingsSource.isEmpty && !restoreToggle.contains(".disabled("),
+               "the restore switch can be turned on and off with snapping off")
+
+        // Previews that move with the window are the only ones that read it.
+        expect(WindowCommandKind.center.previewFollowsWindow
+                && WindowCommandKind.restore.previewFollowsWindow
+                && WindowCommandKind.nextDisplay.previewFollowsWindow
+                && WindowCommandKind.previousDisplay.previewFollowsWindow
+                && !WindowCommandKind.area(GridRect(x: 0, y: 0, width: 12, height: 12)).previewFollowsWindow
+                && !WindowCommandKind.maximize.previewFollowsWindow
+                && !WindowCommandKind.fullScreen.previewFollowsWindow,
+               "a drag reads the window's frame only for a preview that depends on it")
     }
 
     // MARK: Persistence

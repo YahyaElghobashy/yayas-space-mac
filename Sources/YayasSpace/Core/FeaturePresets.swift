@@ -106,10 +106,16 @@ extension AppFeature {
                 ).isEmpty
                 && (defaults.bool(forKey: DefaultsKey.windowLayoutRestoreSizeOnDrag)
                     || WindowCommandPersistence.hasEnabledDragAreas(in: defaults))
+            // Giving a placed window its size back follows drags on its own,
+            // with snapping off, while a window placed by a shortcut or the
+            // green-button menu is remembered.
+            let restoreRuns = defaults.bool(forKey: DefaultsKey.windowLayoutRestoreSizeOnDrag)
+                && defaults.bool(forKey: DefaultsKey.windowLayoutShortcutsEnabled)
             // The green-button menu watches the pointer (throttled, resting
             // pointer only), so it counts as pointer input too.
             return defaults.bool(forKey: DefaultsKey.windowGestureEnabled)
                 || edgeSnapRuns
+                || restoreRuns
                 || defaults.bool(forKey: DefaultsKey.windowLayoutGreenButtonMenuEnabled)
                 ? .pointer : .idle
         case .radialMenu:

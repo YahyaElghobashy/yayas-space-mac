@@ -352,9 +352,10 @@ struct WindowLayoutGeneralTab: View {
                 }
                 .controlSize(.small)
             }
+            // Works for windows placed by any route, so it does not wait
+            // for snapping by dragging to be on.
             Toggle(text.restoreOnDrag, isOn: $restoreOnDrag)
                 .onChange(of: restoreOnDrag) { _, _ in service.syncWithPreferences() }
-                .disabled(!snapEnabled)
             Text(text.restoreOnDragCaption)
                 .font(.caption)
                 .foregroundStyle(.secondary)

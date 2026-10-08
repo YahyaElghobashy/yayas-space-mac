@@ -461,6 +461,55 @@ enum WindowGreenButtonMenuPlacement {
         if above.maxY <= screen.maxY { return clamped(above) }
         return clamped(beside)
     }
+
+}
+
+/// Which parts of window dragging run. Drag snapping previews and places a
+/// window dropped on a drag area. Restoring gives a window Window Layout
+/// placed, by any route (a shortcut, a menu, a picker or a drag), its
+/// earlier size back as soon as a drag takes it away; it works with drag
+/// snapping off, and with the system's own tiling on, because it never
+/// places anything. The drag listener runs while either has work.
+struct WindowDragTracking: Equatable {
+    var placesOnDrop: Bool
+    var restoresSize: Bool
+
+    static let off = WindowDragTracking(placesOnDrop: false, restoresSize: false)
+
+    var listens: Bool { placesOnDrop || restoresSize }
+
+    static func resolve(featureAvailable: Bool,
+                        trusted: Bool,
+                        snappingEnabled: Bool,
+                        hasLiveDragAreas: Bool,
+                        systemTilingEnabled: Bool,
+                        restoreSizeEnabled: Bool,
+                        hasPlacedWindows: Bool) -> WindowDragTracking {
+        guard featureAvailable, trusted else { return .off }
+        return WindowDragTracking(placesOnDrop: snappingEnabled && hasLiveDragAreas && !systemTilingEnabled,
+                                  restoresSize: restoreSizeEnabled && hasPlacedWindows)
+    }
+
+    /// Whether a press on a window starts following the drag: any window
+    /// while drops place, otherwise only one Window Layout placed.
+    func tracksPress(onPlacedWindow: Bool) -> Bool {
+        placesOnDrop || (restoresSize && onPlacedWindow)
+    }
+}
+
+extension WindowCommandKind {
+    /// Whether where this command puts a window depends on the window's
+    /// current frame: its size for Center, its history for Restore, its
+    /// position for the display moves. Only those make a drag preview read
+    /// the dragged window's frame again while it moves.
+    var previewFollowsWindow: Bool {
+        switch self {
+        case .center, .restore, .nextDisplay, .previousDisplay:
+            return true
+        case .area, .maximize, .marginMaximize, .fullScreen, .separator:
+            return false
+        }
+    }
 }
 
 /// Restoring a snapped window to its earlier size once it is dragged away.
