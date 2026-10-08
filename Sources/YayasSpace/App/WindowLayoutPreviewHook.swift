@@ -34,6 +34,13 @@ enum WindowLayoutPreviewHook {
             }
             open(tab: .commands)
         case "menu":
+            // Closed again after a while, as Escape would, so a capture never
+            // leaves the menu open. Menu tracking runs its own run loop mode,
+            // which the common modes include.
+            let close = Timer(timeInterval: 15, repeats: false) { _ in
+                WindowLayoutMenuBarController.shared.closeMenu()
+            }
+            RunLoop.main.add(close, forMode: .common)
             WindowLayoutMenuBarController.shared.openMenu()
         case "green":
             // Beside the Settings window's own green button.

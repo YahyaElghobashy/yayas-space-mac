@@ -55,6 +55,11 @@ final class WindowLayoutMenuBarController: NSObject, NSMenuDelegate {
         statusItem?.button?.performClick(nil)
     }
 
+    /// Closes the open menu as Escape would (the same preview hook).
+    func closeMenu() {
+        menu.cancelTracking()
+    }
+
     private func remove() {
         guard let statusItem else { return }
         NSStatusBar.system.removeStatusItem(statusItem)
@@ -233,17 +238,22 @@ final class WindowLayoutMenuBarController: NSObject, NSMenuDelegate {
     /// the screen rather than a screen split into panes. A template, so it
     /// follows the menu bar's light or dark look. Every edge sits on a half
     /// point, which is a whole pixel on a Retina menu bar.
+    ///
+    /// The canvas stays 20 x 15 pt: on macOS 27 the same mark on a 24 x 16 pt
+    /// canvas made the system close this item's menu a second after it
+    /// opened.
     static func statusImage() -> NSImage {
-        let size = NSSize(width: 24, height: 16)
+        let size = NSSize(width: 20, height: 15)
         let image = NSImage(size: size, flipped: false) { _ in
-            let outline = NSRect(x: 1.25, y: 1.75, width: 21.5, height: 12.5)
+            // The frame's inside runs from 2 to 18 across and 2 to 13 up.
+            let outline = NSRect(x: 1.25, y: 1.25, width: 17.5, height: 12.5)
             let screen = NSBezierPath(roundedRect: outline, xRadius: 2.25, yRadius: 2.25)
             screen.lineWidth = 1.5
             NSColor.black.setStroke()
             screen.stroke()
-            // The inside runs from x 2 to 22 and y 2.5 to 13.5; the window
-            // keeps one point clear of the frame and takes two thirds of it.
-            let window = NSRect(x: 3, y: 3.5, width: 12, height: 9)
+            // The window keeps one point clear of the frame and takes two
+            // thirds of what is left across.
+            let window = NSRect(x: 3, y: 3, width: 9.5, height: 9)
             NSColor.black.setFill()
             NSBezierPath(roundedRect: window, xRadius: 1, yRadius: 1).fill()
             return true
