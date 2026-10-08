@@ -177,7 +177,7 @@ Window Layout moves and sizes the window in front. Its shortcuts, drag snapping 
 - **Green-button menu.** Rest the pointer on a window's green button and your chosen commands open in a menu after a delay you set (100 ms by default), as a list or as a compact grid. Pick a command with the pointer, or press Escape to close the menu. It never takes the keyboard from the app you are typing in, and VoiceOver reads each command as a button.
 - **Menu-bar menu.** A separate Window Layout icon, shown by default, lists your commands with their shortcuts, greys out what cannot change the window in front, and can ignore the app in front so Window Layout leaves it alone. You can hide the icon.
 - **Spacing.** Margins between windows, and an option to fit windows tightly to the screen edges.
-- **Settings file and sync.** Export or import every Window Layout setting as one file, or pick a sync folder (iCloud Drive, Dropbox, a network share) that Yaya's Space keeps up to date. The folder's own app carries the file between Macs and the newer change wins. A sync file that is still downloading from the cloud is skipped until it is on this Mac, so the app never waits on it. Yaya's Space itself makes no network request for this.
+- **Settings file and sync.** Export or import every Window Layout setting as one file, or pick a sync folder (iCloud Drive, Dropbox, a network share) that Yaya's Space keeps up to date. The folder's own app carries the file between Macs and the newer change wins. A sync file that is not on this Mac yet is requested from the folder's own app and read once it arrives, so Yaya's Space never waits on it, and Settings tells you if it never does. Yaya's Space itself makes no network request for this.
 
 | Default shortcut | Command |
 |---|---|

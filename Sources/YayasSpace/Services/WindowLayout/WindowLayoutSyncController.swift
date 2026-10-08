@@ -15,7 +15,10 @@ import UniformTypeIdentifiers
 /// can sit on a cloud drive whose file is still downloading, and a
 /// coordinated read of such a file waits for the download. Only applying the
 /// preferences a file brings hops back to the main thread. A file that is not
-/// downloaded yet is skipped with a note instead of being waited for.
+/// downloaded yet is never waited for: the system is asked to fetch it (the
+/// folder's own client, such as iCloud Drive or Dropbox, does the download;
+/// this app adds no network code) and it is looked at again a little later,
+/// a limited number of times, with a note in Settings either way.
 final class WindowLayoutSyncController: ObservableObject {
     static let shared = WindowLayoutSyncController()
 
@@ -33,8 +36,8 @@ final class WindowLayoutSyncController: ObservableObject {
     /// A change reaches the folder this long after the last edit.
     private static let writeDelay: TimeInterval = 1
     /// While the folder's file is still downloading, look again this often,
-    /// a limited number of times; Sync Now, a change or the next launch
-    /// start over.
+    /// a limited number of times; then Settings says the sync stopped
+    /// trying. Sync Now, a change or the next launch start over.
     private static let downloadRetryDelay: TimeInterval = 30
     private static let downloadRetryLimit = 20
 
@@ -262,6 +265,10 @@ final class WindowLayoutSyncController: ObservableObject {
         let document: WindowLayoutSyncSupport.Document?
         switch readiness(of: fileURL) {
         case .waitingForDownload:
+            // Asks the system to bring the file to this Mac; the folder's
+            // own client does the download, and the next look reads it.
+            // Asking again on every look is harmless.
+            try? FileManager.default.startDownloadingUbiquitousItem(at: fileURL)
             return .waitingForDownload
         case .missing:
             document = nil
@@ -323,10 +330,16 @@ final class WindowLayoutSyncController: ObservableObject {
                 setConflictNote(String(format: strings.syncConflictFormat, device, device))
             }
         case .waitingForDownload:
-            showStatus(strings.syncWaitingForDownload, isError: false, fromSync: true)
-            if downloadRetries < Self.downloadRetryLimit, pendingSync == nil {
-                downloadRetries += 1
-                scheduleFolderSync(after: Self.downloadRetryDelay)
+            if downloadRetries < Self.downloadRetryLimit {
+                showStatus(strings.syncWaitingForDownload, isError: false, fromSync: true)
+                if pendingSync == nil {
+                    downloadRetries += 1
+                    scheduleFolderSync(after: Self.downloadRetryDelay)
+                }
+            } else {
+                // The last look still found it not downloaded: say so
+                // instead of showing "Waiting" for good.
+                showStatus(strings.syncDownloadStopped, isError: true, fromSync: true)
             }
         case .unavailable:
             showStatus(strings.syncFolderUnavailable, isError: true, fromSync: true)

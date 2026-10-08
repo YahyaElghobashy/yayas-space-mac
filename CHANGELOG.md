@@ -15,7 +15,7 @@ All notable changes to this project are documented here. The format follows
 - **Window Layout menu-bar menu.** Its own icon lists your commands with their shortcuts, greys out what cannot change the window in front, and can ignore the app in front. The icon is shown by default and can be hidden.
 - **Ignored apps.** Window Layout leaves the apps you list alone on every route: shortcuts, drags, both menus, the menu-panel grid, the radial menu, the command bar and the window gestures.
 - **Spacing.** Window margins, and an option to fit windows tightly to the screen edges.
-- **Settings file and sync folder.** Export and import every Window Layout setting as one file, or keep it in a folder synced by iCloud Drive, Dropbox or a network share. The newer change wins. Files are read and written in the background, and a sync file that is still downloading from the cloud is skipped until it is on this Mac, so the app never waits on it. No network code was added.
+- **Settings file and sync folder.** Export and import every Window Layout setting as one file, or keep it in a folder synced by iCloud Drive, Dropbox or a network share. The newer change wins. Files are read and written in the background. A sync file that is not on this Mac yet is requested from the folder's own app and read once it has arrived, so the app never waits on it, and Settings says so if it stops trying. No network code was added.
 - **New Settings layout** for Window Layout, with General and Commands tabs, and a notice with a Quit button while another window manager is running.
 
 ### Changed

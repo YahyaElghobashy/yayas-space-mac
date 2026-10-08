@@ -36,6 +36,7 @@ struct WindowCommandStrings {
     let exportFailed: String
     let syncFolderUnavailable: String
     let syncWaitingForDownload: String
+    let syncDownloadStopped: String
 
     // General
     let generalSection: String
@@ -197,6 +198,7 @@ struct WindowCommandStrings {
         exportFailed: "The file could not be written.",
         syncFolderUnavailable: "The sync folder cannot be read. Choose it again.",
         syncWaitingForDownload: "Waiting for the sync file to download to this Mac.",
+        syncDownloadStopped: "The sync file still has not downloaded to this Mac, so syncing stopped trying. Click Sync Now to try again.",
         generalSection: "General",
         showMenuBarItem: "Show the Window Layout menu bar icon",
         showMenuBarItemCaption: "A second icon, next to the main Yaya's Space icon, lists every command for the window in front.",
