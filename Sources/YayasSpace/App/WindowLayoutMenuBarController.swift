@@ -218,31 +218,24 @@ final class WindowLayoutMenuBarController: NSObject, NSMenuDelegate {
 
     // MARK: Icon
 
-    /// A small tiled-display mark: one tall pane beside two stacked ones,
-    /// drawn here as a template so it follows the menu bar's look.
+    /// The item's mark, in the same language as the command glyphs: a small
+    /// screen outline with its left two-thirds filled, a window placed on
+    /// the screen rather than a screen split into panes. A template, so it
+    /// follows the menu bar's light or dark look. Every edge sits on a half
+    /// point, which is a whole pixel on a Retina menu bar.
     static func statusImage() -> NSImage {
-        let size = NSSize(width: 20, height: 15)
+        let size = NSSize(width: 24, height: 16)
         let image = NSImage(size: size, flipped: false) { _ in
-            let outline = NSRect(x: 1.5, y: 1.5, width: 17, height: 12)
-            let frame = NSBezierPath(roundedRect: outline, xRadius: 3, yRadius: 3)
-            frame.lineWidth = 1.4
+            let outline = NSRect(x: 1.25, y: 1.75, width: 21.5, height: 12.5)
+            let screen = NSBezierPath(roundedRect: outline, xRadius: 2.25, yRadius: 2.25)
+            screen.lineWidth = 1.5
             NSColor.black.setStroke()
-            frame.stroke()
-            let inner = outline.insetBy(dx: 2.2, dy: 2.2)
-            let gap: CGFloat = 1.4
-            let leftWidth = (inner.width - gap) * 0.52
-            let left = NSRect(x: inner.minX, y: inner.minY, width: leftWidth, height: inner.height)
-            let rightX = left.maxX + gap
-            let rightWidth = inner.maxX - rightX
-            let paneHeight = (inner.height - gap) / 2
+            screen.stroke()
+            // The inside runs from x 2 to 22 and y 2.5 to 13.5; the window
+            // keeps one point clear of the frame and takes two thirds of it.
+            let window = NSRect(x: 3, y: 3.5, width: 12, height: 9)
             NSColor.black.setFill()
-            NSBezierPath(roundedRect: left, xRadius: 1, yRadius: 1).fill()
-            NSBezierPath(roundedRect: NSRect(x: rightX, y: inner.minY, width: rightWidth, height: paneHeight),
-                         xRadius: 1, yRadius: 1).fill()
-            NSColor.black.withAlphaComponent(0.45).setFill()
-            NSBezierPath(roundedRect: NSRect(x: rightX, y: inner.minY + paneHeight + gap,
-                                             width: rightWidth, height: paneHeight),
-                         xRadius: 1, yRadius: 1).fill()
+            NSBezierPath(roundedRect: window, xRadius: 1, yRadius: 1).fill()
             return true
         }
         image.isTemplate = true
