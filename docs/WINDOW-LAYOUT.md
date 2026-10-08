@@ -50,7 +50,7 @@ While a window is dragged over an area, an overlay previews the destination fram
 
 ## Menus
 
-- **Menu-bar menu** (`App/WindowLayoutMenuBarController.swift`): a separate status item listing the commands marked for it, with glyphs and shortcuts, then Settings, Ignore or Stop ignoring the app in front, Help (this README section), About and Quit. A command is greyed when it cannot change the focused window: no movable window, an ignored app, a display move with one display, nothing to restore, or a result equal to the current frame (`WindowCommandAvailability`).
+- **Menu-bar menu** (`App/WindowLayoutMenuBarController.swift`): a separate status item, shown by default and hidden from General, listing the commands marked for it, with glyphs and shortcuts, then Settings, Ignore or Stop ignoring the app in front, Help (this README section), About and Quit. A command is greyed when it cannot change the focused window: no movable window, an ignored app, a display move with one display, nothing to restore, or a result equal to the current frame (`WindowCommandAvailability`).
 - **Green-button menu** (`WindowGreenButtonService.swift`): the global mouse monitor only records that the pointer moved. A single timer waits until the pointer has rested for the hover delay, then asks Accessibility once what is under it, never faster than about 30 Hz. If that element is a window's zoom button, the menu of commands marked for it opens next to the button. Ignored apps and full-screen windows are skipped.
 - **Glyphs** (`UI/WindowCommandGlyph.swift`) are drawn from each command's own target rectangle. macOS 27 hides menu item images unless an item asks to keep them, so command rows ask.
 
@@ -66,10 +66,11 @@ While a window is dragged over an area, an overlay previews the destination fram
 
 ## Defaults on upgrade
 
-Shortcuts, drag snapping and the green-button menu stay off after updating. Settings shows a notice with a Quit button while another window manager is running, because two of them fight over the same shortcuts and drags.
+Shortcuts, drag snapping and the green-button menu stay off after updating. The menu-bar icon is shown: its commands act only when one is clicked, so it never competes with another window manager. Settings shows a notice with a Quit button while another window manager is running, because two of them fight over the same shortcuts and drags.
 
 | Setting | Default |
 |---|---|
+| Window Layout menu-bar icon | shown |
 | Edge width | 8 pt |
 | Inner-area scale | 80 % |
 | Preview outline | 2 pt |

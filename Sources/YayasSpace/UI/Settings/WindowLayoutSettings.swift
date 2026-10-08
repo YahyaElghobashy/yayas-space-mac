@@ -123,7 +123,7 @@ struct WindowLayoutGeneralTab: View {
     @ObservedObject private var service = WindowLayoutService.shared
     @ObservedObject private var sync = WindowLayoutSyncController.shared
     @AppStorage(DefaultsKey.panelUtilityWindowLayout) private var showInPanel = true
-    @AppStorage(DefaultsKey.windowLayoutShowMenuBarItem) private var showMenuBarItem = false
+    @AppStorage(DefaultsKey.windowLayoutShowMenuBarItem) private var showMenuBarItem = true
     @AppStorage(DefaultsKey.windowLayoutShortcutsEnabled) private var shortcutsEnabled = false
     @AppStorage(DefaultsKey.windowDirectionalEnabled) private var directionalEnabled = false
     @AppStorage(DefaultsKey.windowDirectionalShortcut) private var directionalShortcutRaw =

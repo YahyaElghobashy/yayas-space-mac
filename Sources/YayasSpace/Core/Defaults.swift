@@ -1408,9 +1408,10 @@ enum Defaults {
         DefaultsKey.windowLayoutShortcutBottomTwoThirds: WindowLayoutAction.clearedShortcutStorageValue,
         // Everything that could fight another window manager ships off:
         // snapping, the shortcuts master switch (above) and the green-button
-        // menu. The menu bar icon waits to be asked for too.
+        // menu. The menu bar icon shows: its commands only act when one is
+        // clicked, so it never competes with another window manager.
         DefaultsKey.windowLayoutCommands: "",
-        DefaultsKey.windowLayoutShowMenuBarItem: false,
+        DefaultsKey.windowLayoutShowMenuBarItem: true,
         DefaultsKey.windowLayoutRestoreSizeOnDrag: true,
         DefaultsKey.windowLayoutHighlightAreas: false,
         DefaultsKey.windowLayoutInteriorAreaScale: WindowActivationSettings.defaultInteriorScalePercent,
