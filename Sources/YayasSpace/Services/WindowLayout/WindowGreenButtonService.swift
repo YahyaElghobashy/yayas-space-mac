@@ -38,8 +38,8 @@ final class WindowGreenButtonService {
     private func start() {
         guard moveMonitor == nil else { return }
         hoverDelay = Self.storedHoverDelay()
-        delayObserver = WindowLayoutDefaultsObserver(keys: [DefaultsKey.windowLayoutGreenButtonDelay]) {
-            DispatchQueue.main.async { [weak self] in self?.hoverDelay = Self.storedHoverDelay() }
+        delayObserver = WindowLayoutDefaultsObserver(keys: [DefaultsKey.windowLayoutGreenButtonDelay]) { [weak self] in
+            DispatchQueue.main.async { self?.hoverDelay = Self.storedHoverDelay() }
         }
         moveMonitor = NSEvent.addGlobalMonitorForEvents(matching: [.mouseMoved]) { [weak self] _ in
             self?.pointerMoved()
@@ -277,12 +277,12 @@ struct WindowGreenButtonMenuItem {
 /// on a choice, on a click elsewhere, on Escape, or shortly after the
 /// pointer leaves the panel, the button and the corridor between them.
 ///
-/// The keyboard: once the pointer is over the menu, or the first time an
-/// arrow key, Return or Escape is pressed while it is open, the panel takes
-/// the keyboard without activating Yaya's Space. The arrows then move the
-/// highlight, Return applies the highlighted command and Escape closes the
-/// menu. Until then the app in front keeps its keystrokes, so a menu opened
-/// by a pointer that merely rested on the button never swallows typing.
+/// The keyboard always stays with the app in front: the panel never becomes
+/// the key window, not when it opens and not under the pointer, so typing
+/// in that app is never taken. Escape closes the menu from a global monitor
+/// that only watches; the key still reaches the app. The pointer picks a
+/// command, and VoiceOver reaches each one as a button it can press, which
+/// needs no keyboard focus.
 final class WindowGreenButtonMenuController {
     var onChoose: ((WindowCommand) -> Void)?
     var onClose: (() -> Void)?
@@ -291,7 +291,10 @@ final class WindowGreenButtonMenuController {
     private let content: WindowGreenButtonMenuView
     private let buttonFrame: CGRect
     private var leaveTimer: Timer?
-    private var keyMonitor: Any?
+    /// Watch for Escape, typed into the app in front or, when Yaya's Space
+    /// is that app, into its own windows; neither ever consumes it.
+    private var escapeMonitor: Any?
+    private var ownEscapeMonitor: Any?
     private var closed = false
 
     init(items: [WindowGreenButtonMenuItem],
@@ -317,7 +320,6 @@ final class WindowGreenButtonMenuController {
         panel.level = .popUpMenu
         panel.hidesOnDeactivate = false
         panel.isReleasedWhenClosed = false
-        panel.becomesKeyOnlyIfNeeded = true
         panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .transient, .ignoresCycle]
         panel.animationBehavior = .utilityWindow
 
@@ -338,23 +340,27 @@ final class WindowGreenButtonMenuController {
         panel.contentView = background
 
         content.onChoose = { [weak self] command in self?.onChoose?(command) }
-        content.onClose = { [weak self] in self?.close() }
         content.onHoverChange = { [weak self] inside in
             if inside {
                 self?.cancelLeave()
-                self?.takeKeyboard()
             } else {
                 self?.scheduleLeave()
             }
         }
     }
 
+    /// Shown in front without becoming the key window or activating Yaya's
+    /// Space: the app in front keeps the keyboard.
     func show() {
         panel.orderFrontRegardless()
-        // Watches keys meant for the app in front, without taking them: the
-        // first arrow, Return or Escape hands the keyboard to the menu.
-        keyMonitor = NSEvent.addGlobalMonitorForEvents(matching: [.keyDown]) { [weak self] event in
-            self?.keyPressedElsewhere(event)
+        // Escape typed into the app in front closes the menu. The monitors
+        // only watch, so the key still reaches that app.
+        escapeMonitor = NSEvent.addGlobalMonitorForEvents(matching: [.keyDown]) { [weak self] event in
+            if event.keyCode == 53 { self?.close() } // Escape
+        }
+        ownEscapeMonitor = NSEvent.addLocalMonitorForEvents(matching: [.keyDown]) { [weak self] event in
+            if event.keyCode == 53 { self?.close() } // Escape
+            return event
         }
     }
 
@@ -363,8 +369,10 @@ final class WindowGreenButtonMenuController {
         closed = true
         leaveTimer?.invalidate()
         leaveTimer = nil
-        if let keyMonitor { NSEvent.removeMonitor(keyMonitor) }
-        keyMonitor = nil
+        if let escapeMonitor { NSEvent.removeMonitor(escapeMonitor) }
+        if let ownEscapeMonitor { NSEvent.removeMonitor(ownEscapeMonitor) }
+        escapeMonitor = nil
+        ownEscapeMonitor = nil
         panel.orderOut(nil)
         onClose?()
     }
@@ -384,27 +392,6 @@ final class WindowGreenButtonMenuController {
         }
     }
 
-    private func keyPressedElsewhere(_ event: NSEvent) {
-        guard !closed else { return }
-        switch event.keyCode {
-        case 53: // Escape
-            close()
-        case 123, 124, 125, 126, 36, 76: // arrows, Return, Enter
-            takeKeyboard()
-            content.handleKey(event.keyCode)
-        default:
-            break
-        }
-    }
-
-    /// Makes the panel the key window without activating Yaya's Space, so
-    /// the arrows, Return and Escape reach the menu.
-    private func takeKeyboard() {
-        guard !closed, !panel.isKeyWindow else { return }
-        panel.makeKey()
-        panel.makeFirstResponder(content)
-    }
-
     private func scheduleLeave() {
         guard leaveTimer == nil, !closed else { return }
         let timer = Timer(timeInterval: 0.45, repeats: false) { [weak self] _ in
@@ -421,9 +408,10 @@ final class WindowGreenButtonMenuController {
     }
 }
 
-/// A borderless panel may only take the keyboard when it says so.
+/// Never the key window, whatever asks: the keyboard stays with the app in
+/// front. Clicks and VoiceOver presses reach the menu without it.
 private final class WindowGreenButtonMenuPanel: NSPanel {
-    override var canBecomeKey: Bool { true }
+    override var canBecomeKey: Bool { false }
     override var canBecomeMain: Bool { false }
 }
 
@@ -443,10 +431,10 @@ private final class WindowGreenButtonMenuElement: NSAccessibilityElement {
 }
 
 /// Draws the menu's items, list or grid, reports hovering and choices, and
-/// answers the keyboard and Accessibility for them.
+/// answers Accessibility for them. It takes no keyboard input: the panel
+/// never becomes the key window.
 private final class WindowGreenButtonMenuView: NSView {
     var onChoose: ((WindowCommand) -> Void)?
-    var onClose: (() -> Void)?
     var onHoverChange: ((Bool) -> Void)?
 
     private let items: [WindowGreenButtonMenuItem]
@@ -454,7 +442,7 @@ private final class WindowGreenButtonMenuView: NSView {
     private let grid: WindowGrid
     private var slots: [(index: Int, rect: CGRect)] = []
     private var separators: [CGRect] = []
-    /// The highlighted item, by the pointer or the keyboard.
+    /// The item under the pointer.
     private var hovered: Int?
     private var accessibilityItems: [WindowGreenButtonMenuElement] = []
     private(set) var preferredSize = CGSize(width: 200, height: 40)
@@ -469,7 +457,6 @@ private final class WindowGreenButtonMenuView: NSView {
 
     override var isFlipped: Bool { true }
     override var isOpaque: Bool { false }
-    override var acceptsFirstResponder: Bool { true }
 
     /// Menus print the named keys as the caps on the keyboard.
     static func compactText(_ shortcut: GlobalShortcut) -> String {
@@ -605,84 +592,10 @@ private final class WindowGreenButtonMenuView: NSView {
         onChoose?(items[slot.index].command)
     }
 
-    // MARK: Keyboard
-
-    override func keyDown(with event: NSEvent) {
-        if !handleKey(event.keyCode) { super.keyDown(with: event) }
-    }
-
-    override func cancelOperation(_ sender: Any?) {
-        onClose?()
-    }
-
-    /// Arrows move the highlight between the commands that can act, Return
-    /// or Enter applies it, Escape closes. True when the key was used.
-    @discardableResult
-    func handleKey(_ keyCode: UInt16) -> Bool {
-        switch keyCode {
-        case 53: // Escape
-            onClose?()
-        case 36, 76: // Return, Enter
-            if let hovered, items[hovered].isEnabled { onChoose?(items[hovered].command) }
-        case 125: moveHighlight(dx: 0, dy: 1) // down
-        case 126: moveHighlight(dx: 0, dy: -1) // up
-        case 124: moveHighlight(dx: 1, dy: 0) // right
-        case 123: moveHighlight(dx: -1, dy: 0) // left
-        default:
-            return false
-        }
-        return true
-    }
-
-    private func moveHighlight(dx: Int, dy: Int) {
-        let enabled = slots.filter { items[$0.index].isEnabled }
-        guard !enabled.isEmpty else { return }
-        guard let current = hovered, let from = enabled.first(where: { $0.index == current }) else {
-            // Nothing highlighted yet: start from the first or the last.
-            setHovered((dx + dy >= 0 ? enabled.first : enabled.last)?.index)
-            return
-        }
-        let next: (index: Int, rect: CGRect)?
-        switch layout {
-        case .list:
-            // Up and left go back, down and right go on; the ends wrap.
-            let position = enabled.firstIndex { $0.index == from.index } ?? 0
-            let step = (dx + dy) >= 0 ? 1 : -1
-            next = enabled[(position + step + enabled.count) % enabled.count]
-        case .grid:
-            next = nearest(from: from.rect, dx: dx, dy: dy, among: enabled)
-        }
-        if let next { setHovered(next.index) }
-    }
-
-    /// The nearest enabled cell in a direction on the grid, preferring the
-    /// same row or column.
-    private func nearest(from rect: CGRect, dx: Int, dy: Int,
-                         among enabled: [(index: Int, rect: CGRect)]) -> (index: Int, rect: CGRect)? {
-        let candidates = enabled.filter { slot in
-            if dx > 0 { return slot.rect.midX > rect.midX + 1 }
-            if dx < 0 { return slot.rect.midX < rect.midX - 1 }
-            if dy > 0 { return slot.rect.midY > rect.midY + 1 }
-            return slot.rect.midY < rect.midY - 1
-        }
-        return candidates.min { lhs, rhs in
-            func cost(_ slot: (index: Int, rect: CGRect)) -> CGFloat {
-                let along = dx != 0 ? abs(slot.rect.midX - rect.midX) : abs(slot.rect.midY - rect.midY)
-                let across = dx != 0 ? abs(slot.rect.midY - rect.midY) : abs(slot.rect.midX - rect.midX)
-                return along + across * 4
-            }
-            return cost(lhs) < cost(rhs)
-        }
-    }
-
     private func setHovered(_ index: Int?) {
         guard index != hovered else { return }
         hovered = index
         needsDisplay = true
-        if let index, let slotPosition = slots.firstIndex(where: { $0.index == index }),
-           accessibilityItems.indices.contains(slotPosition) {
-            NSAccessibility.post(element: accessibilityItems[slotPosition], notification: .focusedUIElementChanged)
-        }
     }
 
     override func draw(_ dirtyRect: NSRect) {
