@@ -4,6 +4,24 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project uses
 [Semantic Versioning](https://semver.org/).
 
+## [1.1.0] - 2026-10-08
+
+### Added
+- **Editable window commands.** Window Layout's placements are now commands you can edit. Each one has a target rectangle on a 24 × 12 grid of the screen, an optional shortcut, an optional drag area, and switches for showing it in the menu-bar menu and in the green-button menu. Add your own commands and separators, reorder them, delete any of them, and restore the defaults.
+- **Landscape and portrait sets.** Portrait displays get their own command set (top, middle and bottom thirds and two-thirds), chosen automatically from the display a window is on.
+- **Center two-thirds**, and middle thirds and two-thirds on portrait displays.
+- **Drag areas for every command.** Screen-edge spans, corners and inner areas, drawn on a grid in each command's editor, with a live preview of where the window will land, an option to light up every area while you drag, adjustable edge width and inner-area size, and the preview's colour and outline. A placed window dragged away goes back to its earlier size.
+- **Green-button menu.** Rest the pointer on a window's green button to open the commands you marked for it, after a delay you set, as a list or a compact grid.
+- **Window Layout menu-bar menu.** Its own icon lists your commands with their shortcuts, greys out what cannot change the window in front, and can ignore the app in front. The icon can be hidden.
+- **Ignored apps.** Window Layout leaves the apps you list alone on every route: shortcuts, drags and both menus.
+- **Spacing.** Window margins, and an option to fit windows tightly to the screen edges.
+- **Settings file and sync folder.** Export and import every Window Layout setting as one file, or keep it in a folder synced by iCloud Drive, Dropbox or a network share. The newer change wins. No network code was added.
+- **New Settings layout** for Window Layout, with General and Commands tabs, and a notice with a Quit button while another window manager is running.
+
+### Changed
+- **Restore** moved from ⌃⌥R to ⌃⌥⌫, so ⌃⌥R can place the window on the middle two-thirds. Shortcuts you had changed yourself are carried over unchanged.
+- Window Layout's shortcuts, drag snapping and green-button menu stay off after updating, so the update never fights another window manager you still run.
+
 ## [1.0.2] - 2026-10-08
 
 ### Added

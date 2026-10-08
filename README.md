@@ -103,7 +103,7 @@ The rest bends the same way: panel sections reorder and hide, the compact layout
 ### Windows and the Dock
 
 - **App switcher.** A richer take on pressing ⌘Tab, with adjustable live window thumbnails, minimized windows included, and more than one window per app. Simple mode keeps every window and its title without previews or screen capture, with optional grouping to one entry per app. Optionally press S to keep search open after releasing the switcher shortcut, or hide the shortcut hints below the large icon row. Press the window shortcut directly to move between windows of the app in front. Choose whether it opens on the screen under the pointer, the one with the menu bar or the one with the active window. Set per-app rules to include windowless apps, keep them window-only or hide them. Choose apps where Yaya's Space pauses both switcher and Dock thumbnail capture while they are in front. Minimal previews hide window titles, controls and decoration while keeping selection visible. Middle-click a preview to close that window.
-- **Window layout.** Snap the active window to halves, including a centered half-width placement, thirds, sixths, corners or center with configurable gaps between windows and screen edges, maximize it with or without a margin, or move it to the next or previous display, each with its own optional shortcut. Using the left or right shortcut again carries the window to the display on that side, landing on the half it came in through. Restore steps back through recent placements. Turn on edge snapping in Window Layout, choose its active edges and corners on the visual screen map, then drag a title bar there for a live preview. Hold chosen modifiers and drag anywhere to move it, then add Shift to resize. A mouse can also resize with the right button.
+- **Window layout.** Place the active window with editable commands: halves, quarters, thirds, two-thirds, sixths, a centred half, maximize, center, restore, the next or previous display, and any placements you add yourself. Run them from shortcuts, by dragging a title bar to a screen edge or corner, from a Window Layout menu-bar menu, or from a menu on the green window button, with separate command sets for landscape and portrait displays. Hold chosen modifiers and drag anywhere to move a window, then add Shift to resize. A mouse can also resize with the right button. See [Window Layout](#window-layout).
 - **Dock Preview.** Hover a Dock icon to see adjustable window thumbnails with clear titles, click the one you want or drag it to move and snap the window. Middle-click closes only the pointed window, including in pinned previews. Optional minimal previews hide titles, controls and decoration.
 - **Dock clicks.** Click the Dock icon of the active app to minimize its windows, hide the app, or cycle through its windows.
 - **Maximize windows.** The green button fills the screen without creating another Space, and puts the window back on the next click.
@@ -167,6 +167,29 @@ The rest bends the same way: panel sections reorder and hide, the compact layout
 - **Extra brightness.** Pushes the XDR panel of a MacBook Pro past its regular maximum using the display's HDR headroom. Toggle it from the Displays panel or Settings.
 - **Bluetooth on sleep.** Switches Bluetooth off while the Mac sleeps, so a laptop in a bag stops stealing the headphones you are listening to elsewhere. Bluetooth you had already turned off stays off, and only what Yaya's Space switched off comes back on wake.
 
+## Window Layout
+
+Window Layout moves and sizes the window in front. It starts switched off: open **Settings → Window Layout** and turn on shortcuts, drag snapping and the green-button menu as you need them. If another window manager is still running, such as Magnet, Settings says so and offers to quit it, because two of them fight over the same shortcuts and drags.
+
+- **Commands you can edit.** Every placement is a command. Its target is a rectangle on a 24 × 12 grid of the screen, it can have a shortcut and a drag area, and you choose whether it shows in the menu-bar menu and in the green-button menu. Add as many of your own as you like, add separators, reorder, delete, and restore the defaults at any time.
+- **Landscape and portrait.** Each kind of display has its own command set, so thirds run across a wide screen and down a tall one. Yaya's Space uses the set that matches the display the window is on.
+- **Drag to snap.** Drag a title bar to a screen edge or corner and a preview shows where the window will land; let go to place it. By default the sides take halves, the top takes Maximize, the corners take quarters, and the bottom edge is cut into five spans, so sliding along it walks through the thirds and two-thirds. Adjust how wide the edge areas are, how large the inner areas are, whether every area lights up while you drag, and the colour and outline of the preview. Drag a placed window away and it goes back to its earlier size.
+- **Green-button menu.** Rest the pointer on a window's green button and your chosen commands open in a menu after a delay you set (100 ms by default), as a list or as a compact grid.
+- **Menu-bar menu.** A separate Window Layout icon lists your commands with their shortcuts, greys out what cannot change the window in front, and can ignore the app in front so Window Layout leaves it alone. You can hide the icon.
+- **Spacing.** Margins between windows, and an option to fit windows tightly to the screen edges.
+- **Settings file and sync.** Export or import every Window Layout setting as one file, or pick a sync folder (iCloud Drive, Dropbox, a network share) that Yaya's Space keeps up to date. The folder's own app carries the file between Macs and the newer change wins. Yaya's Space itself makes no network request for this.
+
+| Default shortcut | Command |
+|---|---|
+| ⌃⌥← ⌃⌥→ ⌃⌥↑ ⌃⌥↓ | Left, right, top and bottom half |
+| ⌃⌥U ⌃⌥I ⌃⌥J ⌃⌥K | Top left, top right, bottom left and bottom right quarter |
+| ⌃⌥D ⌃⌥F ⌃⌥G | First, middle and last third |
+| ⌃⌥E ⌃⌥R ⌃⌥T | First, middle and last two-thirds |
+| ⌃⌥⌘→ ⌃⌥⌘← | Next and previous display |
+| ⌃⌥↩ ⌃⌥C ⌃⌥⌫ | Maximize, center and restore |
+
+More detail on commands, drag areas and the settings file is in [docs/WINDOW-LAYOUT.md](docs/WINDOW-LAYOUT.md).
+
 ## Install
 
 **[Download Yaya's Space](https://github.com/YahyaElghobashy/yayas-space-mac/releases/latest/download/Yayas-Space-macOS-arm64.zip)** (macOS 14+, Apple silicon), unzip it, drag `Yaya's Space.app` into Applications and open it.
@@ -209,6 +232,7 @@ One mark everywhere: Yahya's face as a ringed planet, drawn in a Rick and Morty 
 - [Privacy](docs/PRIVACY.md), what does and does not leave your Mac
 - [Permissions](docs/PERMISSIONS.md), every macOS permission explained
 - [Troubleshooting](docs/TROUBLESHOOTING.md), the common fixes
+- [Window Layout](docs/WINDOW-LAYOUT.md), how commands, drag areas and the settings file work
 - [Contributing](CONTRIBUTING.md), building and contributing
 - [Security](SECURITY.md) and [Support](SUPPORT.md)
 
