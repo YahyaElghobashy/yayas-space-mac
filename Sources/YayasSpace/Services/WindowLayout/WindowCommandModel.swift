@@ -252,6 +252,25 @@ enum WindowActivationRegion: Equatable, Hashable {
         }
     }
 
+    /// The units of an edge an edge span may cover: all but the first and
+    /// the last, which belong to the corners at either end (a corner reaches
+    /// one grid unit along both of its edges and wins there anyway).
+    static func edgeSpanUnits(along edge: WindowScreenEdge, in grid: WindowGrid) -> Range<Int> {
+        let units = grid.units(along: edge)
+        guard units > 2 else { return 0..<max(1, units) }
+        return 1..<(units - 1)
+    }
+
+    /// The edge span the drag-area editor draws between two units, in either
+    /// order, kept off the corner cells at both ends.
+    static func edgeSpan(_ edge: WindowScreenEdge, from first: Int, to second: Int,
+                         in grid: WindowGrid) -> WindowActivationRegion {
+        let allowed = edgeSpanUnits(along: edge, in: grid)
+        let lower = min(max(min(first, second), allowed.lowerBound), allowed.upperBound - 1)
+        let upper = min(max(max(first, second), allowed.lowerBound), allowed.upperBound - 1)
+        return .edge(edge, start: lower, end: upper + 1)
+    }
+
     /// The region pulled into the grid, or nil when nothing usable is left.
     func sanitized(in grid: WindowGrid) -> WindowActivationRegion? {
         switch self {

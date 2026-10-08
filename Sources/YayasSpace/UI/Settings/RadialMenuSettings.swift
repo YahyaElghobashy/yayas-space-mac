@@ -999,7 +999,8 @@ private struct RadialItemEditor: View {
             let windowText = FeatureStrings.windowLayout(l10n.language)
             Picker(windowText.title, selection: $item.payload) {
                 ForEach(WindowLayoutAction.allCases) { action in
-                    Label(action.title(windowText), systemImage: action.symbolName)
+                    Label(WindowCommandStrings.listName(action, language: l10n.language),
+                          systemImage: action.symbolName)
                         .tag(action.rawValue)
                 }
             }

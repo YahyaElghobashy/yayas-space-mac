@@ -98,12 +98,15 @@ struct WindowTargetGridEditor: View {
 /// The drag-area editor: the display as a dot grid. Edge spans run along the
 /// border, corners are the four caps, and a rectangle inside is an interior
 /// area. Other commands' areas show faintly so the free parts are easy to
-/// see.
+/// see. A corner owns the first cell along both of its edges, so an edge
+/// span can never be drawn over those cells, and a corner is drawn with
+/// them.
 struct WindowActivationEditor: View {
     let grid: WindowGrid
     @Binding var region: WindowActivationRegion?
     let otherRegions: [WindowActivationRegion]
     var maxHeight: CGFloat = 230
+    var strings: WindowCommandStrings = .localized(L10n.shared.language)
 
     @State private var drag: DragMode?
     @State private var preview: WindowActivationRegion?
@@ -134,6 +137,9 @@ struct WindowActivationEditor: View {
         .aspectRatio(CGFloat(grid.columns) / CGFloat(max(1, grid.rows)), contentMode: .fit)
         .frame(maxWidth: .infinity, maxHeight: maxHeight)
         .accessibilityElement(children: .ignore)
+        .accessibilityLabel(strings.dragAreaTitle)
+        .accessibilityValue(strings.describe(region, grid: grid))
+        .accessibilityHint(strings.dragAreaCaption)
     }
 
     // MARK: Layout
@@ -202,15 +208,17 @@ struct WindowActivationEditor: View {
                 context.fill(Path(ellipseIn: dot), with: .color(Color.primary.opacity(0.22)))
             }
         }
-        // Idle edge units and corner caps.
+        // Idle edge units and corner caps; the first and last unit of each
+        // edge belong to its corners.
         for edge in WindowScreenEdge.allCases {
-            for unit in 0..<grid.units(along: edge) {
+            for unit in WindowActivationRegion.edgeSpanUnits(along: edge, in: grid) {
                 strokeSegment(edge, from: unit, to: unit + 1, layout: layout, in: &context,
                               color: Color.primary.opacity(0.12), width: 3)
             }
         }
         for corner in WindowScreenCorner.allCases {
-            fillCorner(corner, layout: layout, in: &context, color: Color.primary.opacity(0.12), size: 7)
+            drawCorner(corner, layout: layout, in: &context, color: Color.primary.opacity(0.12),
+                       capSize: 7, width: 3)
         }
         for other in otherRegions {
             draw(other, layout: layout, in: &context, color: Color.primary.opacity(0.42))
@@ -226,7 +234,7 @@ struct WindowActivationEditor: View {
         case .edge(let edge, let start, let end):
             strokeSegment(edge, from: start, to: end, layout: layout, in: &context, color: color, width: 6)
         case .corner(let corner):
-            fillCorner(corner, layout: layout, in: &context, color: color, size: 10)
+            drawCorner(corner, layout: layout, in: &context, color: color, capSize: 10, width: 6)
         case .interior(let rect):
             let box = CGRect(x: layout.inner.minX + CGFloat(rect.x) * layout.columnWidth,
                              y: layout.inner.minY + CGFloat(rect.y) * layout.rowHeight,
@@ -248,10 +256,19 @@ struct WindowActivationEditor: View {
         context.stroke(path, with: .color(color), style: StrokeStyle(lineWidth: width, lineCap: .round))
     }
 
-    private func fillCorner(_ corner: WindowScreenCorner, layout: Layout, in context: inout GraphicsContext,
-                            color: Color, size: CGFloat) {
+    /// A corner: its cap, and the first cell along each of its two edges,
+    /// which it reaches at run time.
+    private func drawCorner(_ corner: WindowScreenCorner, layout: Layout, in context: inout GraphicsContext,
+                            color: Color, capSize: CGFloat, width: CGFloat) {
+        let (horizontal, vertical) = corner.edges
+        let alongTop = vertical == .left ? 0 : grid.units(along: horizontal) - 1
+        let alongSide = horizontal == .top ? 0 : grid.units(along: vertical) - 1
+        strokeSegment(horizontal, from: alongTop, to: alongTop + 1, layout: layout, in: &context,
+                      color: color, width: width)
+        strokeSegment(vertical, from: alongSide, to: alongSide + 1, layout: layout, in: &context,
+                      color: color, width: width)
         let point = cornerPoint(corner, layout)
-        let cap = CGRect(x: point.x - size / 2, y: point.y - size / 2, width: size, height: size)
+        let cap = CGRect(x: point.x - capSize / 2, y: point.y - capSize / 2, width: capSize, height: capSize)
         context.fill(Path(ellipseIn: cap), with: .color(color))
     }
 
@@ -265,7 +282,7 @@ struct WindowActivationEditor: View {
             preview = .corner(corner)
         case .edge(let edge, let start):
             let current = unit(along: edge, at: value.location, layout: layout)
-            preview = .edge(edge, start: min(start, current), end: max(start, current) + 1)
+            preview = WindowActivationRegion.edgeSpan(edge, from: start, to: current, in: grid)
         case .interior(let column, let row):
             let current = cell(at: value.location, layout: layout)
             preview = .interior(GridRect.spanning(column: column, row: row,
@@ -297,14 +314,16 @@ struct WindowActivationEditor: View {
         return .interior(column: start.column, row: start.row)
     }
 
+    /// The edge unit under the pointer, kept off the corner cells at both
+    /// ends.
     private func unit(along edge: WindowScreenEdge, at point: CGPoint, layout: Layout) -> Int {
-        let units = grid.units(along: edge)
         let raw: CGFloat
         switch edge {
         case .top, .bottom: raw = (point.x - layout.inner.minX) / layout.columnWidth
         case .left, .right: raw = (point.y - layout.inner.minY) / layout.rowHeight
         }
-        return min(max(Int(floor(raw)), 0), units - 1)
+        let allowed = WindowActivationRegion.edgeSpanUnits(along: edge, in: grid)
+        return min(max(Int(floor(raw)), allowed.lowerBound), allowed.upperBound - 1)
     }
 
     private func cell(at point: CGPoint, layout: Layout) -> (column: Int, row: Int) {

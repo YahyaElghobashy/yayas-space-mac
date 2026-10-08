@@ -128,6 +128,16 @@ struct WindowCommandStrings {
     let dragAreaTitle: String
     let dragAreaCaption: String
     let dragAreaNone: String
+    let regionTopEdge: String
+    let regionLeftEdge: String
+    let regionBottomEdge: String
+    let regionRightEdge: String
+    let regionEdgeSpanFormat: String
+    let regionTopLeftCorner: String
+    let regionTopRightCorner: String
+    let regionBottomLeftCorner: String
+    let regionBottomRightCorner: String
+    let regionInteriorFormat: String
     let clearDragArea: String
     let draggingOffNote: String
     let showTitle: String
@@ -189,9 +199,9 @@ struct WindowCommandStrings {
         syncWaitingForDownload: "Waiting for the sync file to download to this Mac.",
         generalSection: "General",
         showMenuBarItem: "Show the Window Layout menu bar icon",
-        showMenuBarItemCaption: "A second icon, next to Yaya's Space’s own, lists every command for the window in front.",
+        showMenuBarItemCaption: "A second icon, next to the main Yaya's Space icon, lists every command for the window in front.",
         openAtLogin: "Open Yaya's Space at login",
-        openAtLoginCaption: "Window Layout lives inside Yaya's Space, so this is the app’s own login item.",
+        openAtLoginCaption: "Window Layout lives inside Yaya's Space, so this switch starts the whole app at login.",
         keyboardSection: "Keyboard",
         draggingSection: "Dragging",
         snapByDragging: "Snap dragged windows into place",
@@ -263,6 +273,16 @@ struct WindowCommandStrings {
         dragAreaTitle: "Drag area",
         dragAreaCaption: "Drag along an edge, click a corner, or drag a rectangle inside the screen. Faint marks belong to other commands.",
         dragAreaNone: "No drag area yet.",
+        regionTopEdge: "Top edge",
+        regionLeftEdge: "Left edge",
+        regionBottomEdge: "Bottom edge",
+        regionRightEdge: "Right edge",
+        regionEdgeSpanFormat: "%@, cells %d to %d of %d",
+        regionTopLeftCorner: "Top left corner",
+        regionTopRightCorner: "Top right corner",
+        regionBottomLeftCorner: "Bottom left corner",
+        regionBottomRightCorner: "Bottom right corner",
+        regionInteriorFormat: "Area inside the screen, %@ of its width and %@ of its height",
         clearDragArea: "Clear",
         draggingOffNote: "Snapping by dragging is off. Turn it on in General.",
         showTitle: "Show in",
@@ -352,6 +372,51 @@ struct WindowCommandStrings {
         return "\(base) \(number)"
     }
 
+    /// The built-ins only the vertical set uses by default.
+    private static let verticalBuiltins: Set<WindowLayoutAction> = [
+        .topThird, .middleThird, .bottomThird, .topTwoThirds, .middleTwoThirds, .bottomTwoThirds,
+    ]
+
+    /// The name a built-in shows in lists that hold every built-in at once
+    /// (the radial menu, the command bar): its command name, with the set
+    /// added only where two built-ins would otherwise read the same, such as
+    /// the Center Third of a landscape display and of a portrait one.
+    static func listName(_ action: WindowLayoutAction, language: AppLanguage) -> String {
+        let name = builtinName(action, language: language)
+        guard verticalBuiltins.contains(action),
+              WindowLayoutAction.allCases.contains(where: {
+                  $0 != action && builtinName($0, language: language) == name
+              })
+        else { return name }
+        return "\(name) (\(localized(language).setVertical))"
+    }
+
+    /// What VoiceOver reads for a drag area in the editor.
+    func describe(_ region: WindowActivationRegion?, grid: WindowGrid) -> String {
+        guard let region else { return dragAreaNone }
+        switch region {
+        case .edge(let edge, let start, let end):
+            let name: String
+            switch edge {
+            case .top: name = regionTopEdge
+            case .left: name = regionLeftEdge
+            case .bottom: name = regionBottomEdge
+            case .right: name = regionRightEdge
+            }
+            return String(format: regionEdgeSpanFormat, name, start + 1, end, grid.units(along: edge))
+        case .corner(let corner):
+            switch corner {
+            case .topLeft: return regionTopLeftCorner
+            case .topRight: return regionTopRightCorner
+            case .bottomLeft: return regionBottomLeftCorner
+            case .bottomRight: return regionBottomRightCorner
+            }
+        case .interior(let rect):
+            return String(format: regionInteriorFormat,
+                          rect.widthFraction(in: grid).text, rect.heightFraction(in: grid).text)
+        }
+    }
+
     /// Explains what a fixed (non-area) command does, in place of the grid.
     func caption(for kind: WindowCommandKind) -> String? {
         switch kind {
@@ -367,16 +432,18 @@ struct WindowCommandStrings {
     }
 }
 
-// The legacy placement titles (panel grid, radial menu, command bar) of the
-// built-ins added in 1.1.0. English until translated: every language reads
-// the same value, the way the project falls back for new strings.
+// The names of the built-ins added in 1.1.0 wherever the earlier placement
+// titles are read: the same words as their commands (the portrait set calls
+// its middle row Center Third, as the landscape set calls its middle column).
+// English until translated: every language reads the same value, the way the
+// project falls back for new strings.
 extension WindowLayoutFeatureStrings {
-    var centerTwoThirds: String { "Center 2/3" }
-    var topThird: String { "Top 1/3" }
-    var middleThird: String { "Middle 1/3" }
-    var bottomThird: String { "Bottom 1/3" }
-    var topTwoThirds: String { "Top 2/3" }
-    var middleTwoThirds: String { "Middle 2/3" }
-    var bottomTwoThirds: String { "Bottom 2/3" }
+    var centerTwoThirds: String { "Center Two Thirds" }
+    var topThird: String { "Top Third" }
+    var middleThird: String { "Center Third" }
+    var bottomThird: String { "Bottom Third" }
+    var topTwoThirds: String { "Top Two Thirds" }
+    var middleTwoThirds: String { "Center Two Thirds" }
+    var bottomTwoThirds: String { "Bottom Two Thirds" }
     var rows: String { "Rows" }
 }

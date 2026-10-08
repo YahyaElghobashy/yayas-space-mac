@@ -17,6 +17,7 @@ enum WindowCommandTests {
         activationHitTesting(expect)
         availability(expect)
         routingAndRepeatRules(expect)
+        namesAndEditors(expect)
         menusAndPlacement(expect)
         restoreOnDrag(expect)
         persistence(expect)
@@ -598,6 +599,72 @@ enum WindowCommandTests {
         expect(WindowCommandRouting.labelShortcut(for: .leftHalf, in: configuration,
                                                   displayKinds: [.horizontal]) == nil,
                "a switched-off shortcut is not printed")
+    }
+
+    // MARK: Names and editors
+
+    private static func namesAndEditors(_ expect: (Bool, String) -> Void) {
+        // One name per placement, on every surface.
+        let layoutText = FeatureStrings.windowLayout(.enUS)
+        let added: [WindowLayoutAction] = [.centerTwoThirds, .topThird, .middleThird, .bottomThird,
+                                           .topTwoThirds, .middleTwoThirds, .bottomTwoThirds]
+        expect(WindowLayoutAction.middleThird.title(layoutText) == "Center Third"
+                && WindowLayoutAction.middleTwoThirds.title(layoutText) == "Center Two Thirds"
+                && added.allSatisfy { $0.title(layoutText) == WindowCommandStrings.builtinName($0, language: .enUS) },
+               "the built-ins added with the command sets carry their command names on every surface")
+        expect(WindowCommandStrings.listName(.middleThird, language: .enUS) == "Center Third (Vertical)"
+                && WindowCommandStrings.listName(.centerThird, language: .enUS) == "Center Third"
+                && WindowCommandStrings.listName(.topThird, language: .enUS) == "Top Third"
+                && WindowCommandStrings.listName(.leftHalf, language: .enUS) == "Left",
+               "lists of every built-in use the command names, adding the set only where two would read the same")
+        for language in AppLanguage.allCases {
+            let names = WindowLayoutAction.allCases.map { WindowCommandStrings.listName($0, language: language) }
+            expect(Set(names).count == names.count,
+                   "\(language.rawValue) names every built-in once in the lists that show them all")
+        }
+        let stringsSource = (try? String(contentsOfFile: "Sources/YayasSpace/Core/WindowCommandStrings.swift",
+                                          encoding: .utf8)) ?? ""
+        expect(!stringsSource.isEmpty && !stringsSource.contains("Middle 1/3") && !stringsSource.contains("Middle 2/3"),
+               "no placement is called Middle 1/3 or Middle 2/3 any more")
+        let english = WindowCommandStrings.enUS
+        let texts = Mirror(reflecting: english).children.compactMap { $0.value as? String }
+        expect(!texts.isEmpty && texts.allSatisfy { text in
+                   !text.replacingOccurrences(of: "Yaya's Space", with: "").contains("'")
+                       && !(text.contains("Yaya's Space") && text.contains("\u{2019}"))
+               },
+               "apostrophes follow the project: the brand keeps its own, every other one is curly, never both in one line")
+
+        // VoiceOver reads a drag area in words.
+        let horizontal = WindowCommandSetKind.horizontal.grid
+        expect(english.describe(.edge(.left, start: 1, end: 11), grid: horizontal) == "Left edge, cells 2 to 11 of 12"
+                && english.describe(.corner(.topRight), grid: horizontal) == "Top right corner"
+                && english.describe(.interior(GridRect(x: 6, y: 3, width: 12, height: 6)), grid: horizontal)
+                    == "Area inside the screen, 1/2 of its width and 1/2 of its height"
+                && english.describe(nil, grid: horizontal) == english.dragAreaNone,
+               "the drag-area editor describes its area for VoiceOver")
+
+        // Edge spans stay off the corner cells.
+        typealias Region = WindowActivationRegion
+        expect(Region.edgeSpanUnits(along: .left, in: horizontal) == 1..<11
+                && Region.edgeSpanUnits(along: .top, in: horizontal) == 1..<23
+                && Region.edgeSpanUnits(along: .top, in: WindowCommandSetKind.vertical.grid) == 1..<11,
+               "an edge span may use every unit of its edge but the corner cells at both ends")
+        expect(Region.edgeSpan(.left, from: 0, to: 11, in: horizontal) == .edge(.left, start: 1, end: 11)
+                && Region.edgeSpan(.top, from: 23, to: 20, in: horizontal) == .edge(.top, start: 20, end: 23)
+                && Region.edgeSpan(.bottom, from: 0, to: 0, in: horizontal) == .edge(.bottom, start: 1, end: 2),
+               "dragging along an edge in the editor never takes in a corner's cell")
+        let screen = WindowActivationScreen(frame: landscapeFrame,
+                                            visibleFrame: CGRect(x: 0, y: 0, width: 1440, height: 875))
+        var configuration = WindowCommandConfiguration.defaults
+        let leftIndex = configuration.horizontal.firstIndex { $0.builtinID == .leftHalf }!
+        configuration.horizontal[leftIndex].activation = Region.edgeSpan(.left, from: 0, to: 11, in: horizontal)
+        let edgeOwned = (0...899).filter { y in
+            WindowActivationHitTest.match(at: CGPoint(x: 0, y: CGFloat(y)), screens: [screen],
+                                          commands: { configuration[$0] },
+                                          settings: .standard)?.commandID == configuration.horizontal[leftIndex].id
+        }
+        expect(!edgeOwned.isEmpty && edgeOwned.min()! >= 75 && edgeOwned.max()! <= 825,
+               "a full-length span drawn in the editor answers only between the corners, as drawn")
     }
 
     // MARK: Menus and placement

@@ -262,8 +262,10 @@ struct PanelWindowLayoutView: View {
         }
     }
 
+    /// The command names, the same words the Commands tab and both menus
+    /// use; the group headings tell the landscape and portrait thirds apart.
     private func title(for action: WindowLayoutAction) -> String {
-        action.title(text)
+        WindowCommandStrings.builtinName(action, language: l10n.language)
     }
 
     private var resultMessage: String? {

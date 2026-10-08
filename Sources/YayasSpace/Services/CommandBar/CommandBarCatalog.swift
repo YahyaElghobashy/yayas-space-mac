@@ -642,9 +642,12 @@ enum CommandBarCatalog {
                 var keywords = layoutText.title
                 if action == .maximize { keywords += " " + layoutText.fullScreen }
                 if action == .fullScreen { keywords += " " + layoutText.maximize }
+                // Rows carry the command names; the earlier short titles
+                // ("Left 1/3") still find them.
+                keywords += " " + action.title(layoutText)
                 entries.append(CommandBarEntry(
                     id: "action.layout.\(action.rawValue)",
-                    title: action.title(layoutText),
+                    title: WindowCommandStrings.listName(action, language: language),
                     subtitle: layoutArea,
                     keywords: keywords,
                     icon: .symbol(action.symbolName),
