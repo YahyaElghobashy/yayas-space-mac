@@ -46,9 +46,24 @@ final class WindowLayoutService: ObservableObject {
     private var registeredShortcuts: [GlobalShortcut] = []
     /// Windows a placement snapped, with the size they had before, so a
     /// drag can give that size back.
-    private var snapRecords: [WindowLayoutWindowKey: WindowSnapRecord] = [:]
-    /// What dragging does, as last resolved; the tap reads it on each press.
+    private var placements = WindowPlacements()
+    /// When the remembered placements were last checked against the window
+    /// server, which happens only on a press, at most every few seconds.
+    private var placementsCheckedAt: TimeInterval = 0
+    private static let placementsCheckInterval: TimeInterval = 5
+    /// What dragging does, kept current by every change that can alter it
+    /// (the switches, the command sets, the session, the system's tiling,
+    /// the placed windows), so a press never works it out again.
     private var dragTracking = WindowDragTracking.off
+    /// Follows drags while only restoring a placed window's size needs
+    /// them: a global monitor, never in the input path.
+    private var passiveDragMonitor: Any?
+    /// macOS's own tiling switches, read again only when Window Layout's
+    /// settings change, when an app becomes active while drops could place
+    /// (leaving System Settings is one) and before a drop places a window;
+    /// never on a click.
+    private var systemTilingEnabled = WindowEdgeSnapSupport.isSystemTilingEnabled
+    private var appActivationObserver: NSObjectProtocol?
     private var commandStoreObservation: AnyCancellable?
     private var directionalHotKeyRef: EventHotKeyRef?
     private var registeredDirectionalShortcut: GlobalShortcut?
@@ -126,50 +141,86 @@ final class WindowLayoutService: ObservableObject {
             && trusted
         wantsGesture ? startGestureTap() : stopGestureTap()
 
+        // A settings change is one of the moments the system's tiling is
+        // read again; a click never reads it.
+        systemTilingEnabled = WindowEdgeSnapSupport.isSystemTilingEnabled
         syncDragTracking(available: available, trusted: trusted)
         WindowLayoutCompanions.sync(available: available, trusted: trusted)
     }
 
-    /// What dragging has to do right now, from the switches, the system's
-    /// own tiling and whether any placed window is remembered.
-    private func resolveDragTracking(available: Bool, trusted: Bool) -> WindowDragTracking {
-        let defaults = UserDefaults.standard
-        return WindowDragTracking.resolve(
-            featureAvailable: available,
-            trusted: trusted,
-            snappingEnabled: defaults.bool(forKey: DefaultsKey.windowEdgeSnapEnabled),
-            hasLiveDragAreas: commands.hasEnabledActivation,
-            systemTilingEnabled: WindowEdgeSnapSupport.isSystemTilingEnabled,
-            restoreSizeEnabled: defaults.bool(forKey: DefaultsKey.windowLayoutRestoreSizeOnDrag),
-            hasPlacedWindows: !snapRecords.isEmpty)
-    }
-
-    private func resolveDragTracking() -> WindowDragTracking {
-        let available = AppFeature.windowLayout.isAvailable
-        let trusted = SessionActivitySupport.tapShouldRun(
+    /// Works out what dragging has to do from the switches, the system's own
+    /// tiling (as cached) and whether any placed window is remembered, then
+    /// runs the one listener that needs: the active tap only while drops
+    /// place windows, the passive monitor while only restoring a placed
+    /// window's size has work, nothing otherwise. A drag already under way
+    /// finishes with the listener it started with, unless the feature or
+    /// its permission went away.
+    private func syncDragTracking(available: Bool? = nil, trusted: Bool? = nil) {
+        let available = available ?? AppFeature.windowLayout.isAvailable
+        let trusted = trusted ?? SessionActivitySupport.tapShouldRun(
             featureWanted: available,
             accessibilityGranted: AXIsProcessTrusted(),
             sessionIsActive: SessionActivity.shared.isActive)
-        return resolveDragTracking(available: available, trusted: trusted)
+        let defaults = UserDefaults.standard
+        let snappingEnabled = defaults.bool(forKey: DefaultsKey.windowEdgeSnapEnabled)
+        let hasLiveDragAreas = commands.hasEnabledActivation
+        dragTracking = WindowDragTracking.resolve(
+            featureAvailable: available,
+            trusted: trusted,
+            snappingEnabled: snappingEnabled,
+            hasLiveDragAreas: hasLiveDragAreas,
+            systemTilingEnabled: systemTilingEnabled,
+            restoreSizeEnabled: defaults.bool(forKey: DefaultsKey.windowLayoutRestoreSizeOnDrag),
+            hasPlacedWindows: !placements.isEmpty)
+        // Whether drops place hangs on the system's tiling only while
+        // snapping could place at all; only then is it kept fresh.
+        watchSystemTiling(available && trusted && snappingEnabled && hasLiveDragAreas)
+        if !available || !trusted || !isFollowingPress {
+            applyDragListener()
+        }
     }
 
-    /// Runs the drag listener while drag snapping or restoring a placed
-    /// window's size has work, and only then. A drag already under way
-    /// finishes first, unless the feature or its permission went away.
-    private func syncDragTracking(available: Bool? = nil, trusted: Bool? = nil) {
-        let tracking: WindowDragTracking
-        if let available, let trusted {
-            tracking = resolveDragTracking(available: available, trusted: trusted)
-        } else {
-            tracking = resolveDragTracking()
+    private var isFollowingPress: Bool {
+        edgeSnapPressOrigin != nil || edgeSnapDrag != nil
+    }
+
+    /// Installs the listener `dragTracking` asks for and removes the other,
+    /// so a press is never followed twice.
+    private func applyDragListener() {
+        let wanted = dragTracking.listener
+        if wanted != .active, edgeSnapTap != nil { stopEdgeSnapTap() }
+        if wanted != .passive, passiveDragMonitor != nil { stopPassiveDragMonitor() }
+        switch wanted {
+        case .active: startEdgeSnapTap()
+        case .passive: startPassiveDragMonitor()
+        case .none: break
         }
-        dragTracking = tracking
-        if tracking.listens {
-            startEdgeSnapTap()
-        } else if available == false || trusted == false
-                    || (edgeSnapPressOrigin == nil && edgeSnapDrag == nil) {
-            stopEdgeSnapTap()
+    }
+
+    /// While drops could place a window, any app becoming active (leaving
+    /// System Settings is one) reads the system's tiling again. One read
+    /// per activation, never per click, and no observer at all otherwise.
+    private func watchSystemTiling(_ watching: Bool) {
+        if watching {
+            guard appActivationObserver == nil else { return }
+            appActivationObserver = NSWorkspace.shared.notificationCenter.addObserver(
+                forName: NSWorkspace.didActivateApplicationNotification, object: nil, queue: .main
+            ) { [weak self] _ in
+                self?.refreshSystemTiling()
+            }
+        } else if let observer = appActivationObserver {
+            NSWorkspace.shared.notificationCenter.removeObserver(observer)
+            appActivationObserver = nil
         }
+    }
+
+    /// Reads the system's tiling switches again; when they changed, what
+    /// dragging does is worked out again.
+    private func refreshSystemTiling() {
+        let enabled = WindowEdgeSnapSupport.isSystemTilingEnabled
+        guard enabled != systemTilingEnabled else { return }
+        systemTilingEnabled = enabled
+        syncDragTracking()
     }
 
     /// Stops every Window Layout input hook before Accessibility is revoked or
@@ -180,6 +231,8 @@ final class WindowLayoutService: ObservableObject {
         unregisterDirectionalHotkey()
         stopGestureTap()
         stopEdgeSnapTap()
+        stopPassiveDragMonitor()
+        watchSystemTiling(false)
         WindowLayoutCompanions.suspend()
         for timer in settleTimers.values { timer.invalidate() }
         settleTimers.removeAll()
@@ -259,7 +312,7 @@ final class WindowLayoutService: ObservableObject {
             }
             if setFrame(previous, on: target.window, windowKey: target.key) {
                 lastActions.removeValue(forKey: target.key)
-                if snapRecords.removeValue(forKey: target.key) != nil { syncDragTracking() }
+                if placements.forget(target.key), placements.isEmpty { syncDragTracking() }
                 return finish(.success(restored: true))
             }
             frameHistory.record(previous, for: target.key)
@@ -564,9 +617,7 @@ final class WindowLayoutService: ObservableObject {
         activeWindows.insert(current)
         frameHistory.removeStaleWindows(keeping: activeWindows)
         lastActions = lastActions.filter { activeWindows.contains($0.key) }
-        let placedBefore = snapRecords.count
-        snapRecords = snapRecords.filter { activeWindows.contains($0.key) }
-        if snapRecords.count != placedBefore { syncDragTracking() }
+        if placements.keep(only: activeWindows), placements.isEmpty { syncDragTracking() }
     }
 
     private func activeWindowKeys() -> Set<WindowLayoutWindowKey>? {
@@ -940,17 +991,10 @@ final class WindowLayoutService: ObservableObject {
     private func noteSnapped(_ key: WindowLayoutWindowKey,
                              placed: WindowLayoutFrame,
                              before: WindowLayoutFrame) {
-        let beforeRect = CGRect(origin: before.origin, size: before.size)
-        let hadPlacedWindows = !snapRecords.isEmpty
-        if let existing = snapRecords[key],
-           WindowRestoreOnDrag.isStillSnapped(current: beforeRect,
-                                              placed: CGRect(origin: existing.placed.origin,
-                                                             size: existing.placed.size),
-                                              tolerance: 24) {
-            snapRecords[key] = WindowSnapRecord(placed: placed, originalSize: existing.originalSize)
-        } else {
-            snapRecords[key] = WindowSnapRecord(placed: placed, originalSize: before.size)
-        }
+        let hadPlacedWindows = !placements.isEmpty
+        placements.note(key,
+                        placed: CGRect(origin: placed.origin, size: placed.size),
+                        before: CGRect(origin: before.origin, size: before.size))
         // The first placed window wakes the drag listener when only
         // restoring sizes needs it.
         if !hadPlacedWindows { syncDragTracking() }
@@ -1452,6 +1496,7 @@ final class WindowLayoutService: ObservableObject {
 
     // MARK: - Drag to screen edge
 
+    /// Runs only while drops place windows (`WindowDragListener.active`).
     /// The callback copies scalar values and gets out of the input path before
     /// any Accessibility or UI work. It only adjusts the exact top coordinate
     /// after a window move has already been confirmed on the main queue.
@@ -1481,15 +1526,7 @@ final class WindowLayoutService: ObservableObject {
     }
 
     private func stopEdgeSnapTap() {
-        edgeSnapSequenceGeneration += 1
-        edgeSnapPressOrigin = nil
-        edgeSnapPressCandidate = nil
-        edgeSnapPressPlaces = false
-        edgeSnapSequenceSuppressed = false
-        edgeSnapResolveAttempts = 0
-        edgeSnapDrag = nil
-        hideEdgeSnapPreview(immediately: true)
-        WindowLayoutOverlays.shared.endDrag()
+        resetDragFollowing()
         if let edgeSnapRunLoopSource {
             CFRunLoopRemoveSource(CFRunLoopGetMain(), edgeSnapRunLoopSource, .commonModes)
         }
@@ -1513,55 +1550,177 @@ final class WindowLayoutService: ObservableObject {
             DispatchQueue.main.async { [weak self] in self?.cancelEdgeSnapTracking() }
             return Unmanaged.passUnretained(event)
         }
-        guard event.getIntegerValueField(.eventSourceUserData) != Self.syntheticEventMarker,
-              event.getIntegerValueField(.eventSourceUnixProcessID) != Self.ownProcessID
-        else { return Unmanaged.passUnretained(event) }
+        guard !Self.isOwnEvent(event) else { return Unmanaged.passUnretained(event) }
 
         if type == .leftMouseDown {
-            // The system's own tiling owns drops. Giving a placed window its
-            // size back never drops anything, so it keeps running beside it.
-            edgeSnapSequenceSuppressed = !dragTracking.restoresSize && WindowEdgeSnapSupport.isSystemTilingEnabled
+            // Every press goes to the main thread, which decides whether it
+            // is followed; the rest of an unfollowed press goes by here.
+            edgeSnapSequenceSuppressed = false
         } else if edgeSnapSequenceSuppressed {
             if type == .leftMouseUp { edgeSnapSequenceSuppressed = false }
             return Unmanaged.passUnretained(event)
         }
-        guard !edgeSnapSequenceSuppressed else { return Unmanaged.passUnretained(event) }
-
-        let input: WindowEdgeSnapPointerInput
-        switch type {
-        case .leftMouseDown:
-            input = .down(location: event.location, flags: event.flags)
-        case .leftMouseDragged:
-            let originalLocation = event.location
-            input = .dragged(location: originalLocation)
-            if let drag = edgeSnapDrag,
-               drag.isMoving,
-               drag.protectsSystemTopEdge {
-                event.location = WindowEdgeSnapSupport.locationAvoidingSystemTopDrag(
-                    originalLocation,
-                    screenFrames: drag.quartzScreenFrames,
-                    enabledZones: drag.enabledZones
-                )
-            }
-        case .leftMouseUp:
-            input = .up(location: event.location)
-        default:
+        guard let input = Self.pointerInput(type: type, event: event) else {
             return Unmanaged.passUnretained(event)
         }
-        DispatchQueue.main.async { [weak self] in self?.handleEdgeSnapInput(input) }
+        if case .dragged(let originalLocation) = input,
+           let drag = edgeSnapDrag,
+           drag.isMoving,
+           drag.protectsSystemTopEdge {
+            event.location = WindowEdgeSnapSupport.locationAvoidingSystemTopDrag(
+                originalLocation,
+                screenFrames: drag.quartzScreenFrames,
+                enabledZones: drag.enabledZones
+            )
+        }
+        DispatchQueue.main.async { [weak self] in self?.handleEdgeSnapInput(input, from: .active) }
         return Unmanaged.passUnretained(event)
     }
 
-    private func handleEdgeSnapInput(_ input: WindowEdgeSnapPointerInput) {
+    /// Events this app posted itself (the press a gesture hands back), which
+    /// neither listener follows.
+    private static func isOwnEvent(_ event: CGEvent) -> Bool {
+        event.getIntegerValueField(.eventSourceUserData) == syntheticEventMarker
+            || event.getIntegerValueField(.eventSourceUnixProcessID) == ownProcessID
+    }
+
+    /// What a left-button event says, the same for the tap and the passive
+    /// monitor.
+    private static func pointerInput(type: CGEventType, event: CGEvent) -> WindowEdgeSnapPointerInput? {
+        switch type {
+        case .leftMouseDown: return .down(location: event.location, flags: event.flags)
+        case .leftMouseDragged: return .dragged(location: event.location)
+        case .leftMouseUp: return .up(location: event.location)
+        default: return nil
+        }
+    }
+
+    // MARK: - Following drags passively
+
+    /// Restoring a placed window's size never places anything, so it never
+    /// needs to sit in the input path: a global monitor watches copies of
+    /// the left-button events on their way to other apps. It can only
+    /// watch, so a slow answer here can never hold up a click anywhere. It
+    /// runs from the first placement until no placed window is left.
+    private func startPassiveDragMonitor() {
+        guard passiveDragMonitor == nil else { return }
+        passiveDragMonitor = NSEvent.addGlobalMonitorForEvents(
+            matching: [.leftMouseDown, .leftMouseDragged, .leftMouseUp]
+        ) { [weak self] event in
+            self?.observePassiveDragEvent(event)
+        }
+    }
+
+    private func stopPassiveDragMonitor() {
+        guard let monitor = passiveDragMonitor else { return }
+        NSEvent.removeMonitor(monitor)
+        passiveDragMonitor = nil
+        resetDragFollowing()
+    }
+
+    /// Main thread. A press goes through the same handler as the tap's; the
+    /// rest of a press nobody follows returns before the event is even
+    /// read.
+    private func observePassiveDragEvent(_ event: NSEvent) {
+        switch event.type {
+        case .leftMouseDown:
+            break
+        case .leftMouseDragged, .leftMouseUp:
+            guard !edgeSnapSequenceSuppressed, isFollowingPress else {
+                if event.type == .leftMouseUp { edgeSnapSequenceSuppressed = false }
+                return
+            }
+        default:
+            return
+        }
+        guard let cgEvent = event.cgEvent, !Self.isOwnEvent(cgEvent) else { return }
+        if event.type == .leftMouseDown { edgeSnapSequenceSuppressed = false }
+        guard let input = Self.pointerInput(type: cgEvent.type, event: cgEvent) else { return }
+        handleEdgeSnapInput(input, from: .passive)
+    }
+
+    /// Drops whatever press or drag is being followed, with its preview.
+    private func resetDragFollowing() {
+        edgeSnapSequenceGeneration += 1
+        edgeSnapPressOrigin = nil
+        edgeSnapPressCandidate = nil
+        edgeSnapPressPlaces = false
+        edgeSnapSequenceSuppressed = false
+        edgeSnapResolveAttempts = 0
+        edgeSnapDrag = nil
+        hideEdgeSnapPreview(immediately: true)
+        WindowLayoutOverlays.shared.endDrag()
+    }
+
+    /// Forgets the placed windows the window server no longer shows where
+    /// they were placed: closed, quit, moved or resized some other way. It
+    /// asks about the remembered windows only, only on a press, at most
+    /// every few seconds; never from a timer.
+    private func forgetPlacementsThatLeftIfDue() {
+        let now = ProcessInfo.processInfo.systemUptime
+        guard !placements.isEmpty,
+              now - placementsCheckedAt >= Self.placementsCheckInterval else { return }
+        placementsCheckedAt = now
+        // Nil only when the window server could not answer: then nothing is
+        // forgotten on a guess.
+        guard let windows = Self.windowServerOwnersAndBounds(of: placements.windowIDs) else { return }
+        placements.forgetLeft { windows[$0] }
+    }
+
+    /// The owner and bounds the window server has for a few given windows,
+    /// in one question; a window that no longer exists is left out.
+    private static func windowServerOwnersAndBounds(
+        of windowIDs: [CGWindowID]
+    ) -> [CGWindowID: (pid: pid_t, bounds: CGRect)]? {
+        var values: [UnsafeRawPointer?] = windowIDs.filter { $0 != 0 }
+            .map { UnsafeRawPointer(bitPattern: UInt($0)) }
+        guard !values.isEmpty else { return [:] }
+        guard let array = CFArrayCreate(kCFAllocatorDefault, &values, values.count, nil),
+              let windows = CGWindowListCreateDescriptionFromArray(array) as? [[String: Any]]
+        else { return nil }
+        var result: [CGWindowID: (pid: pid_t, bounds: CGRect)] = [:]
+        for window in windows {
+            guard let number = (window[kCGWindowNumber as String] as? NSNumber)?.uint32Value,
+                  let pid = (window[kCGWindowOwnerPID as String] as? NSNumber)?.int32Value,
+                  let bounds = WindowServerSupport.bounds(from: window) else { continue }
+            result[CGWindowID(number)] = (pid, bounds)
+        }
+        return result
+    }
+
+    // MARK: - Following a press
+
+    private func handleEdgeSnapInput(_ input: WindowEdgeSnapPointerInput, from listener: WindowDragListener) {
         switch input {
         case .down(let location, let flags):
             cancelEdgeSnapTracking()
             edgeSnapSequenceSuppressed = false
-            // Decided afresh on every press: the switches, the system's own
-            // tiling and the placed windows can all change between drags.
-            let tracking = resolveDragTracking()
-            dragTracking = tracking
-            guard tracking.listens else {
+            let tracking = dragTracking
+            guard tracking.listener == listener else {
+                // A listener that outlived a change made while a drag was
+                // followed: the right one takes over and this press goes by.
+                edgeSnapSequenceSuppressed = true
+                applyDragListener()
+                return
+            }
+            if !tracking.placesOnDrop {
+                // Only restoring: a press away from every placed window is
+                // left alone before the window server is asked anything,
+                // and once no placed window is left nothing follows presses.
+                forgetPlacementsThatLeftIfDue()
+                guard !placements.isEmpty else {
+                    edgeSnapSequenceSuppressed = true
+                    syncDragTracking()
+                    return
+                }
+                guard placements.mayHold(location) else {
+                    edgeSnapSequenceSuppressed = true
+                    return
+                }
+            }
+            // The grant can go before the permission check notices; a press
+            // that would be followed finds out first, and the listener stops.
+            guard AXIsProcessTrusted() else {
                 edgeSnapSequenceSuppressed = true
                 syncDragTracking()
                 return
@@ -1631,9 +1790,9 @@ final class WindowLayoutService: ObservableObject {
             edgeSnapDrag = nil
             hideEdgeSnapPreview(immediately: false)
             WindowLayoutOverlays.shared.endDrag()
-            // A drag that gave the last placed window its size back may
-            // leave the listener with nothing to do.
-            syncDragTracking()
+            // A listener change asked for while this press was followed
+            // takes effect now that it is over.
+            applyDragListener()
             // Restoring alone never places anything on release.
             guard places else { return }
             let generation = edgeSnapSequenceGeneration
@@ -1675,7 +1834,7 @@ final class WindowLayoutService: ObservableObject {
     /// Whether Window Layout placed this window and still remembers its
     /// earlier size.
     private func isPlacedWindow(pid: pid_t, windowID: CGWindowID) -> Bool {
-        snapRecords.keys.contains { $0.processID == pid && $0.windowID == windowID }
+        placements.contains(processID: pid, windowID: windowID)
     }
 
     private func applyDelayedEdgeSnapIfMoved(_ drag: WindowEdgeSnapDrag,
@@ -1775,13 +1934,18 @@ final class WindowLayoutService: ObservableObject {
                 if dragTracking.restoresSize {
                     restoreSizeIfSnapped(&drag, pointer: location)
                 }
+                // Taken away from where it was placed, with its size back or
+                // not, the window is no longer placed. Once none is left,
+                // nothing follows presses for restoring any more.
+                let lastPlacementGone = placements.forget(drag.key) && placements.isEmpty
                 guard drag.places else {
-                    // Nothing to drop: the size is back, and the rest of this
-                    // press goes by untouched.
+                    // Nothing to drop: the rest of this press goes by
+                    // untouched.
                     cancelEdgeSnapTracking()
-                    syncDragTracking()
+                    if lastPlacementGone { syncDragTracking() }
                     return
                 }
+                if lastPlacementGone { syncDragTracking() }
                 let context = makeDragContext()
                 drag.context = context
                 WindowLayoutOverlays.shared.beginDrag(screens: context.screens,
@@ -1954,12 +2118,16 @@ final class WindowLayoutService: ObservableObject {
 
     private func applyEdgeSnap(_ drag: WindowEdgeSnapDrag,
                                target: WindowCommandDragTarget) {
+        // A drop is about to place a window: the one pointer moment the
+        // system's tiling is read afresh. If it took the drops over since,
+        // this drop is left to it.
+        refreshSystemTiling()
         guard drag.places,
               AppFeature.windowLayout.isAvailable,
               UserDefaults.standard.bool(forKey: DefaultsKey.windowEdgeSnapEnabled),
               let command = commands.command(id: target.commandID)?.command,
               command.effectiveActivation != nil,
-              !WindowEdgeSnapSupport.isSystemTilingEnabled,
+              !systemTilingEnabled,
               AXIsProcessTrusted(),
               canSetFrame(on: drag.window),
               AXWindowResolver.windowID(for: drag.window) == drag.key.windowID,
@@ -1987,15 +2155,15 @@ final class WindowLayoutService: ObservableObject {
     /// Gives a window Window Layout placed (by a shortcut, a menu, a picker
     /// or a drag) its earlier size back as soon as a drag takes it out of
     /// that placement, keeping the pointer on the same spot of the title
-    /// bar. Works with drag snapping off.
+    /// bar. Works with drag snapping off. The caller forgets the placement
+    /// either way.
     private func restoreSizeIfSnapped(_ drag: inout WindowEdgeSnapDrag, pointer: CGPoint) {
         guard drag.restoredFrame == nil,
               UserDefaults.standard.bool(forKey: DefaultsKey.windowLayoutRestoreSizeOnDrag),
-              let record = snapRecords[drag.key],
+              let record = placements[drag.key],
               WindowRestoreOnDrag.isStillSnapped(current: drag.initialFrame,
-                                                 placed: CGRect(origin: record.placed.origin,
-                                                                size: record.placed.size),
-                                                 tolerance: 24),
+                                                 placed: record.placed,
+                                                 tolerance: WindowPlacements.tolerance),
               abs(record.originalSize.width - drag.initialFrame.width) > 1
                 || abs(record.originalSize.height - drag.initialFrame.height) > 1
         else { return }
@@ -2008,7 +2176,6 @@ final class WindowLayoutService: ObservableObject {
         _ = setSize(restored.size, on: drag.window)
         _ = setPosition(restored.origin, on: drag.window)
         drag.restoredFrame = restored
-        snapRecords.removeValue(forKey: drag.key)
     }
 
     private func cancelEdgeSnapTracking() {
@@ -3073,11 +3240,6 @@ private struct WindowCommandDragTarget: Equatable {
     let setKind: WindowCommandSetKind
     let previewFrame: CGRect
     let visibleFrame: CGRect
-}
-
-private struct WindowSnapRecord {
-    var placed: WindowLayoutFrame
-    var originalSize: CGSize
 }
 
 /// A press the tap is holding while it is still undecided. It keeps the

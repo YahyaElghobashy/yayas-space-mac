@@ -747,13 +747,13 @@ enum WindowCommandTests {
                                        hasLiveDragAreas: areas, systemTilingEnabled: tiling,
                                        restoreSizeEnabled: restore, hasPlacedWindows: placed)
         }
-        expect(gate().listens && gate().restoresSize && !gate().placesOnDrop,
+        expect(gate().listener != .none && gate().restoresSize && !gate().placesOnDrop,
                "with drag snapping off the listener still runs to give a placed window its size back")
-        expect(!gate(placed: false).listens && !gate(restore: false).listens,
+        expect(gate(placed: false).listener == .none && gate(restore: false).listener == .none,
                "with snapping off it runs only while restoring is on and a placed window is remembered")
         expect(gate(snapping: true, restore: false).placesOnDrop
-                && gate(snapping: true, placed: false).listens
-                && !gate(snapping: true, areas: false, restore: false).listens,
+                && gate(snapping: true, placed: false).listener != .none
+                && gate(snapping: true, areas: false, restore: false).listener == .none,
                "snapping listens whenever some command has a live drag area")
         expect(!gate(snapping: true, tiling: true).placesOnDrop && gate(snapping: true, tiling: true).restoresSize,
                "the system's own tiling takes the drops but never the restoring")
@@ -762,6 +762,68 @@ enum WindowCommandTests {
         expect(gate().tracksPress(onPlacedWindow: true) && !gate().tracksPress(onPlacedWindow: false)
                 && gate(snapping: true, placed: false).tracksPress(onPlacedWindow: false),
                "with only restoring to do, a press is followed only on a window Window Layout placed")
+
+        // Passive or active: only drops sit in the input path.
+        expect(gate(snapping: true).listener == .active
+                && gate(snapping: true, restore: false, placed: false).listener == .active,
+               "drag snapping with live areas uses the active tap, which drops need")
+        expect(gate().listener == .passive
+                && gate(snapping: true, areas: false).listener == .passive
+                && gate(snapping: true, tiling: true).listener == .passive,
+               "restoring alone follows drags passively, never with an event tap, even beside the system's tiling")
+        expect(gate(placed: false).listener == .none && gate(restore: false).listener == .none
+                && gate(snapping: true, tiling: true, placed: false).listener == .none
+                && gate(available: false, snapping: true).listener == .none
+                && gate(trusted: false, snapping: true).listener == .none,
+               "nothing follows drags with no placed window, restoring off, or the feature or permission gone")
+
+        // Placed windows: remembered until they are no longer where they
+        // were placed, so following presses stops when none is left.
+        let key = WindowLayoutWindowKey(processID: 42, processLaunchTime: 1, windowID: 7)
+        let other = WindowLayoutWindowKey(processID: 43, processLaunchTime: 1, windowID: 8)
+        let original = CGRect(x: 200, y: 150, width: 800, height: 600)
+        var placements = WindowPlacements()
+        placements.note(key, placed: snapped, before: original)
+        let rightHalf = CGRect(x: 720, y: 25, width: 720, height: 875)
+        placements.note(key, placed: rightHalf, before: snapped.offsetBy(dx: 4, dy: 0))
+        expect(placements[key] == WindowPlacements.Record(placed: rightHalf, originalSize: original.size),
+               "placing a window again straight from its placed frame keeps the size it had first")
+        placements.note(key, placed: snapped, before: CGRect(x: 300, y: 300, width: 500, height: 400))
+        expect(placements[key]?.originalSize == CGSize(width: 500, height: 400),
+               "a window moved since its placement starts over with its size of the moment")
+        expect(placements.contains(processID: 42, windowID: 7) && !placements.contains(processID: 43, windowID: 7),
+               "a press is matched to a placed window by its process and window")
+
+        expect(placements.mayHold(CGPoint(x: 360, y: 30)) && placements.mayHold(CGPoint(x: -10, y: 30))
+                && !placements.mayHold(CGPoint(x: 1000, y: 400)),
+               "only a press in or near a placed frame goes on to ask the window server")
+
+        let draggedAway = placements.forget(key)
+        expect(draggedAway && placements.isEmpty && !placements.forget(key),
+               "a drag that takes a placed window away forgets it")
+        expect(gate(placed: !placements.isEmpty).listener == .none,
+               "with the last placed window dragged away, nothing follows presses any more")
+
+        placements.note(key, placed: snapped, before: original)
+        placements.note(other, placed: rightHalf, before: original)
+        let stillThere = placements
+        var check = stillThere
+        expect(!check.forgetLeft(current: { id in
+                   id == 7 ? (pid: 42, bounds: snapped.offsetBy(dx: 10, dy: 0)) : (pid: 43, bounds: rightHalf)
+               }) && check.records.count == 2,
+               "windows still where they were placed, within the slack, stay remembered")
+        check = stillThere
+        expect(check.forgetLeft(current: { id in id == 7 ? nil : (pid: 43, bounds: rightHalf) })
+                && check[key] == nil && check[other] != nil,
+               "a placed window that closed is forgotten")
+        check = stillThere
+        expect(check.forgetLeft(current: { id in
+                   id == 7 ? (pid: 42, bounds: snapped.offsetBy(dx: 300, dy: 0)) : (pid: 99, bounds: rightHalf)
+               }) && check.isEmpty,
+               "a placed window moved some other way, or a window id now owned by another process, is forgotten")
+        check = stillThere
+        expect(check.keep(only: [other]) && check[key] == nil && check[other] != nil && !check.keep(only: [other]),
+               "pruning keeps only the windows that still exist")
         let settingsSource = (try? String(contentsOfFile: "Sources/YayasSpace/UI/Settings/WindowLayoutSettings.swift",
                                           encoding: .utf8)) ?? ""
         let restoreToggle = settingsSource.components(separatedBy: "Toggle(text.restoreOnDrag").dropFirst().first?

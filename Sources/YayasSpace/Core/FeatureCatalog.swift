@@ -71,19 +71,20 @@ extension AppFeature {
                                    boolFor: (String) -> Bool) -> Bool {
         switch self {
         case .windowLayout:
-            // Drag snapping listens while some command has a drag area or a
-            // snapped window should get its size back. The earlier zone list
-            // is only ever non-empty for a moment: the command store folds
-            // it into the commands' own switches.
+            // Drag snapping listens while some command has a drag area.
+            // Giving a placed window its size back follows drags on its own,
+            // snapping on or off, after a placement by any route. The
+            // earlier zone list is only ever non-empty for a moment: the
+            // command store folds it into the commands' own switches.
             return boolFor(DefaultsKey.windowLayoutShortcutsEnabled)
                 || boolFor(DefaultsKey.windowGestureEnabled)
                 || boolFor(DefaultsKey.windowLayoutGreenButtonMenuEnabled)
+                || boolFor(DefaultsKey.windowLayoutRestoreSizeOnDrag)
                 || (boolFor(DefaultsKey.windowEdgeSnapEnabled)
                     && !WindowEdgeSnapZone.enabledZones(
                         from: edgeSnapDisabledZones
                     ).isEmpty
-                    && (boolFor(DefaultsKey.windowLayoutRestoreSizeOnDrag)
-                        || WindowCommandPersistence.hasEnabledDragAreas(in: .standard)))
+                    && WindowCommandPersistence.hasEnabledDragAreas(in: .standard))
         case .screenOCR, .cleaningMode, .screenshot, .commandBar, .screenRecorder:
             return false
         default:

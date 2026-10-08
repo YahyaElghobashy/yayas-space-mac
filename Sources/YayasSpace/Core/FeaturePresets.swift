@@ -99,18 +99,19 @@ extension AppFeature {
             return .inputs
         case .windowLayout:
             let defaults = UserDefaults.standard
+            // Drag snapping keeps its event tap while some command has a
+            // live drag area.
             let edgeSnapRuns = defaults.bool(forKey: DefaultsKey.windowEdgeSnapEnabled)
                 && !WindowEdgeSnapZone.enabledZones(
                     from: defaults.string(
                         forKey: DefaultsKey.windowEdgeSnapDisabledZones)
                 ).isEmpty
-                && (defaults.bool(forKey: DefaultsKey.windowLayoutRestoreSizeOnDrag)
-                    || WindowCommandPersistence.hasEnabledDragAreas(in: defaults))
-            // Giving a placed window its size back follows drags on its own,
-            // with snapping off, while a window placed by a shortcut or the
-            // green-button menu is remembered.
+                && WindowCommandPersistence.hasEnabledDragAreas(in: defaults)
+            // Giving a placed window its size back watches left-button drags
+            // on its own, with snapping off, from a placement by any route
+            // (a shortcut, either menu, a picker; the menu-bar menu is there
+            // from the start) until no placed window is left.
             let restoreRuns = defaults.bool(forKey: DefaultsKey.windowLayoutRestoreSizeOnDrag)
-                && defaults.bool(forKey: DefaultsKey.windowLayoutShortcutsEnabled)
             // The green-button menu watches the pointer (throttled, resting
             // pointer only), so it counts as pointer input too.
             return defaults.bool(forKey: DefaultsKey.windowGestureEnabled)

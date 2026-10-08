@@ -507,19 +507,36 @@ enum WindowGreenButtonMenuPlacement {
     }
 }
 
+/// How window drags are followed, when at all.
+enum WindowDragListener: Equatable {
+    case none
+    /// A global event monitor: it watches left-button events on their way
+    /// to other apps and can never hold, change or delay one. Enough for
+    /// giving a placed window its size back, which never places anything.
+    case passive
+    /// An event tap in the input path: only drops need it, to keep a
+    /// confirmed window drag off the edge that opens the system's overview.
+    case active
+}
+
 /// Which parts of window dragging run. Drag snapping previews and places a
 /// window dropped on a drag area. Restoring gives a window Window Layout
 /// placed, by any route (a shortcut, a menu, a picker or a drag), its
 /// earlier size back as soon as a drag takes it away; it works with drag
 /// snapping off, and with the system's own tiling on, because it never
-/// places anything. The drag listener runs while either has work.
+/// places anything. The drag listener runs while either has work: the
+/// active tap only while drops place, a passive monitor while only
+/// restoring has work.
 struct WindowDragTracking: Equatable {
     var placesOnDrop: Bool
     var restoresSize: Bool
 
     static let off = WindowDragTracking(placesOnDrop: false, restoresSize: false)
 
-    var listens: Bool { placesOnDrop || restoresSize }
+    var listener: WindowDragListener {
+        if placesOnDrop { return .active }
+        return restoresSize ? .passive : .none
+    }
 
     static func resolve(featureAvailable: Bool,
                         trusted: Bool,
@@ -584,6 +601,87 @@ enum WindowRestoreOnDrag {
                       y: (pointerNow.y - grabDepth).rounded(),
                       width: width,
                       height: height)
+    }
+}
+
+/// The windows Window Layout placed and still remembers, each with the size
+/// it had before, so a drag can give that size back. Drags are followed for
+/// restoring only while this holds a window, so a window leaves it as soon
+/// as it is no longer where it was placed: when a drag takes it away
+/// (restored or not), when the window server shows it moved, resized or
+/// gone, or when its size was given back some other way. Frames are
+/// Accessibility frames, the window server's space (origin top-left).
+struct WindowPlacements {
+    struct Record: Equatable {
+        var placed: CGRect
+        var originalSize: CGSize
+    }
+
+    /// How far a window may sit from its placed frame and still count as
+    /// placed; the restore applies the same slack.
+    static let tolerance: CGFloat = 24
+
+    private(set) var records: [WindowLayoutWindowKey: Record] = [:]
+
+    var isEmpty: Bool { records.isEmpty }
+
+    subscript(key: WindowLayoutWindowKey) -> Record? { records[key] }
+
+    var windowIDs: [CGWindowID] { records.keys.map(\.windowID) }
+
+    /// Remembers a placement. Placing a window again straight from where it
+    /// was placed keeps the size it had before the first placement, so a
+    /// drag away always goes back to the window's own size.
+    mutating func note(_ key: WindowLayoutWindowKey, placed: CGRect, before: CGRect) {
+        if let existing = records[key],
+           WindowRestoreOnDrag.isStillSnapped(current: before, placed: existing.placed,
+                                              tolerance: Self.tolerance) {
+            records[key] = Record(placed: placed, originalSize: existing.originalSize)
+        } else {
+            records[key] = Record(placed: placed, originalSize: before.size)
+        }
+    }
+
+    /// Forgets one window, as a drag that takes it away does. True when it
+    /// was remembered.
+    @discardableResult
+    mutating func forget(_ key: WindowLayoutWindowKey) -> Bool {
+        records.removeValue(forKey: key) != nil
+    }
+
+    /// Keeps only the windows that still exist. True when any was forgotten.
+    @discardableResult
+    mutating func keep(only live: Set<WindowLayoutWindowKey>) -> Bool {
+        let before = records.count
+        records = records.filter { live.contains($0.key) }
+        return records.count != before
+    }
+
+    /// Forgets every window the window server no longer shows where it was
+    /// placed: gone (`current` answers nil), owned by another process, or
+    /// moved or resized beyond the slack. True when any was forgotten.
+    @discardableResult
+    mutating func forgetLeft(current: (CGWindowID) -> (pid: pid_t, bounds: CGRect)?) -> Bool {
+        let before = records.count
+        records = records.filter { key, record in
+            guard let now = current(key.windowID), now.pid == key.processID else { return false }
+            return WindowRestoreOnDrag.isStillSnapped(current: now.bounds, placed: record.placed,
+                                                      tolerance: Self.tolerance)
+        }
+        return records.count != before
+    }
+
+    func contains(processID: pid_t, windowID: CGWindowID) -> Bool {
+        records.keys.contains { $0.processID == processID && $0.windowID == windowID }
+    }
+
+    /// Whether a press can be on a placed window at all: inside a frame one
+    /// was placed in, with the same slack. Every other press is left alone
+    /// before the window server is asked anything.
+    func mayHold(_ point: CGPoint) -> Bool {
+        records.values.contains {
+            $0.placed.insetBy(dx: -Self.tolerance, dy: -Self.tolerance).contains(point)
+        }
     }
 }
 

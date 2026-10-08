@@ -14870,6 +14870,8 @@ struct MetricsTests {
             DefaultsKey.windowLayoutShortcutsEnabled,
             DefaultsKey.windowGestureEnabled,
             DefaultsKey.windowEdgeSnapEnabled,
+            // Restoring a placed window's size follows drags with snapping off.
+            DefaultsKey.windowLayoutRestoreSizeOnDrag,
         ]
         expect(!AppFeature.windowLayout.monitorsPermissionChanges(boolFor: { _ in false })
                && !AppFeature.windowLayout.monitorsPermissionChanges {
@@ -15522,7 +15524,11 @@ struct MetricsTests {
         let previousWindowEdgeSnapZones = UserDefaults.standard.object(
             forKey: DefaultsKey.windowEdgeSnapDisabledZones
         )
+        let previousWindowRestoreEnergy = UserDefaults.standard.object(
+            forKey: DefaultsKey.windowLayoutRestoreSizeOnDrag
+        )
         UserDefaults.standard.set(false, forKey: DefaultsKey.windowGestureEnabled)
+        UserDefaults.standard.set(false, forKey: DefaultsKey.windowLayoutRestoreSizeOnDrag)
         UserDefaults.standard.set(true, forKey: DefaultsKey.windowEdgeSnapEnabled)
         UserDefaults.standard.set("", forKey: DefaultsKey.windowEdgeSnapDisabledZones)
         expect(AppFeature.windowLayout.energyProfile == .pointer,
@@ -15533,6 +15539,16 @@ struct MetricsTests {
         )
         expect(AppFeature.windowLayout.energyProfile == .idle,
                "edge snapping keeps no pointer listener when every visual zone is off")
+        UserDefaults.standard.set(false, forKey: DefaultsKey.windowEdgeSnapEnabled)
+        UserDefaults.standard.set(true, forKey: DefaultsKey.windowLayoutRestoreSizeOnDrag)
+        expect(AppFeature.windowLayout.energyProfile == .pointer,
+               "restoring a placed window's size reports its drag listener with snapping and shortcuts off")
+        if let previousWindowRestoreEnergy {
+            UserDefaults.standard.set(previousWindowRestoreEnergy,
+                                      forKey: DefaultsKey.windowLayoutRestoreSizeOnDrag)
+        } else {
+            UserDefaults.standard.removeObject(forKey: DefaultsKey.windowLayoutRestoreSizeOnDrag)
+        }
         if let previousWindowEdgeSnapZones {
             UserDefaults.standard.set(previousWindowEdgeSnapZones,
                                       forKey: DefaultsKey.windowEdgeSnapDisabledZones)

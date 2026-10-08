@@ -54,7 +54,16 @@ A confirmed drag reads the displays, the area settings, the command sets and the
 
 ### Restore to original size
 
-A window Window Layout placed, by any route (a shortcut, either menu, a built-in picker or a drag), returns to its size from before the placement as soon as a drag takes it away, with the pointer kept on the same spot of the title bar. A window resized by hand since the placement keeps its size. This works with drag snapping off: the drag listener runs while drag snapping has live areas, or while restoring is on and some placed window is remembered (`WindowDragTracking`). It starts with the first placement and stops when the last placed window is gone. With snapping off it follows only presses on a placed window, never changes the pointer events, and skips the preview, the overlays and the drop. macOS's own tiling only takes the drops, so restoring keeps working beside it.
+A window Window Layout placed, by any route (a shortcut, either menu, a built-in picker or a drag), returns to its size from before the placement as soon as a drag takes it away, with the pointer kept on the same spot of the title bar. A window resized by hand since the placement keeps its size. This works with drag snapping off.
+
+Drags are followed by one of two listeners (`WindowDragTracking.listener`), never both:
+
+- **Active**, an event tap, only while drag snapping has live areas and macOS's own tiling is off, because only a drop needs to sit in the input path (it keeps a confirmed window drag off the edge that opens the system's window overview). It follows every press, as before, and gives a placed window its size back on the way.
+- **Passive**, a global `NSEvent` monitor for the left button, while only restoring has work: restoring is on and some placed window is remembered. It watches copies of the events on their way to other apps and can never hold, change or delay one. A press away from every placed frame (with a 24 pt slack) is dropped at once, before the window server is asked anything; only a press there goes on to the window-server hit test. It never shows the preview or the overlays and never drops.
+
+The placed windows live in `WindowPlacements`. A window leaves it as soon as it is no longer where it was placed: when a drag takes it away (its size back or not), when Restore puts it back, or when the window server shows it closed, moved or resized some other way. That last check asks the window server about the remembered windows only, on a press, at most every 5 seconds, never from a timer. The passive monitor starts with the first placement and is removed with the last one, and also when restoring is turned off, the feature is turned off or Window Layout is suspended. A switch between the two listeners asked for during a drag waits until that press ends.
+
+macOS's own tiling switches are cached: they are read again when Window Layout's settings change, when an app becomes active while drops could place (leaving System Settings is one), and before a drop places a window, never on a click. macOS's tiling only takes the drops, so restoring keeps working beside it.
 
 ## Geometry and spacing
 
@@ -106,5 +115,5 @@ Shortcuts, drag snapping and the green-button menu stay off after updating. The 
 
 ## Checking it
 
-- `./build.sh --test` runs `Tests/WindowCommandTests.swift` with the rest of the suite: grid geometry with margins, set choice on mixed landscape and portrait displays, activation hit-testing and priority, persistence round trips, separator clean-up and migration (shortcuts and margins), shortcut conflicts, greyed states and the capability each command needs, repeat rules by origin, picker routing and printed shortcuts, the drag listener's gate, the green-button corridor, names and VoiceOver descriptions, edge spans kept off corners, and the sync decision, file name, readiness and observed keys.
+- `./build.sh --test` runs `Tests/WindowCommandTests.swift` with the rest of the suite: grid geometry with margins, set choice on mixed landscape and portrait displays, activation hit-testing and priority, persistence round trips, separator clean-up and migration (shortcuts and margins), shortcut conflicts, greyed states and the capability each command needs, repeat rules by origin, picker routing and printed shortcuts, the drag listener's gate and its passive or active choice, the placed-window rules (kept first size, forgotten when dragged away, closed, moved or resized), the green-button corridor, names and VoiceOver descriptions, edge spans kept off corners, and the sync decision, file name, readiness and observed keys.
 - Developer builds accept `--window-layout-preview general|commands[:name]|menu|green`, which opens that surface shortly after launch so it can be checked and captured without moving the pointer.
