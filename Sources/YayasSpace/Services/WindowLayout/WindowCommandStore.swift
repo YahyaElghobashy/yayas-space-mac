@@ -15,9 +15,6 @@ final class WindowCommandStore: ObservableObject {
 
     @Published private(set) var configuration: WindowCommandConfiguration
 
-    /// Called after every change, on the thread that made it (main).
-    var onChange: (() -> Void)?
-
     private let defaults: UserDefaults
 
     /// `persistentValue` answers what the person saved for a key, never a
@@ -29,7 +26,7 @@ final class WindowCommandStore: ObservableObject {
         configuration = loaded.configuration
         if loaded.migrated {
             WindowCommandPersistence.save(configuration, to: defaults)
-            Self.migrateFitTightly(in: defaults)
+            Self.migrateMargins(in: defaults)
         }
         foldLegacyZonesIfNeeded()
     }
@@ -62,6 +59,20 @@ final class WindowCommandStore: ObservableObject {
         commit(set, in: kind)
     }
 
+    /// Adds a separator beside a command where it divides two groups:
+    /// after it, or before it when after would leave the separator at the
+    /// end or next to another one. Returns its id, or nil when there is no
+    /// such place (an empty set, or one command).
+    @discardableResult
+    func insertSeparator(in kind: WindowCommandSetKind, near id: UUID?) -> UUID? {
+        var set = configuration[kind]
+        guard let index = WindowCommandListEditing.separatorInsertionIndex(in: set, near: id) else { return nil }
+        let separator = WindowCommand.separator()
+        set.insert(separator, at: index)
+        commit(set, in: kind)
+        return separator.id
+    }
+
     /// Inserts after the given command, or at the end.
     func insert(_ command: WindowCommand, in kind: WindowCommandSetKind, after id: UUID?) {
         var set = configuration[kind]
@@ -91,7 +102,7 @@ final class WindowCommandStore: ObservableObject {
         // it when moving up: either way the command takes the target's slot.
         let command = set.remove(at: from)
         set.insert(command, at: to)
-        commit(set, in: kind)
+        commitMove(of: command, in: set, kind: kind)
     }
 
     func move(_ id: UUID, by offset: Int, in kind: WindowCommandSetKind) {
@@ -101,6 +112,18 @@ final class WindowCommandStore: ObservableObject {
         guard to != from else { return }
         let command = set.remove(at: from)
         set.insert(command, at: to)
+        commitMove(of: command, in: set, kind: kind)
+    }
+
+    /// A separator never moves to a place where it would divide nothing
+    /// (an end of the list, or beside another separator): the move is
+    /// refused rather than the separator dropped. A command that leaves its
+    /// group empty takes the group's spare separator with it.
+    private func commitMove(of command: WindowCommand, in set: [WindowCommand], kind: WindowCommandSetKind) {
+        if command.isSeparator,
+           !WindowCommandPersistence.sanitized(set).contains(where: { $0.id == command.id }) {
+            return
+        }
         commit(set, in: kind)
     }
 
@@ -109,17 +132,12 @@ final class WindowCommandStore: ObservableObject {
     }
 
     func replaceConfiguration(_ configuration: WindowCommandConfiguration) {
-        guard configuration != self.configuration else { return }
-        self.configuration = configuration
+        let cleaned = WindowCommandConfiguration(
+            horizontal: WindowCommandPersistence.sanitized(configuration.horizontal),
+            vertical: WindowCommandPersistence.sanitized(configuration.vertical))
+        guard cleaned != self.configuration else { return }
+        self.configuration = cleaned
         persist()
-    }
-
-    /// Re-reads the stored sets after something else wrote them (an import
-    /// through the settings backup).
-    func reloadFromDefaults() {
-        guard let stored = WindowCommandPersistence.load(from: defaults), stored != configuration else { return }
-        configuration = stored
-        onChange?()
     }
 
     /// Visual zones switched off in the earlier fixed picker, arriving with an
@@ -146,9 +164,12 @@ final class WindowCommandStore: ObservableObject {
         }
     }
 
+    /// Every edit leaves the list exactly as a later launch reads it back:
+    /// unique ids, and no doubled, leading or trailing separators. What the
+    /// list shows after an edit is what it shows after a relaunch.
     private func commit(_ set: [WindowCommand], in kind: WindowCommandSetKind) {
         var updated = configuration
-        updated[kind] = set
+        updated[kind] = WindowCommandPersistence.sanitized(set)
         guard updated != configuration else { return }
         configuration = updated
         persist()
@@ -156,16 +177,26 @@ final class WindowCommandStore: ObservableObject {
 
     private func persist() {
         WindowCommandPersistence.save(configuration, to: defaults)
-        onChange?()
     }
 
-    /// The earlier gap pickers could leave the screen gap at zero with a
-    /// window gap set, which is exactly "no space at screen edges".
-    static func migrateFitTightly(in defaults: UserDefaults) {
-        let windowGap = defaults.integer(forKey: DefaultsKey.windowLayoutWindowGap)
-        let screenGap = defaults.integer(forKey: DefaultsKey.windowLayoutScreenGap)
-        if windowGap > 0, screenGap == 0 {
+    /// The earlier gap pickers kept a window gap and a screen gap that could
+    /// differ, while the command model has one margin and a "fit tightly"
+    /// switch. The margin becomes the window gap when there is one, else the
+    /// screen gap; a zero screen gap beside a window gap is fitting tightly.
+    /// Both gaps are then stored to match, so the margin Settings shows is
+    /// the one windows get.
+    static func migrateMargins(in defaults: UserDefaults) {
+        let legacy = WindowCommandGeometry.normalizedLegacyGaps(
+            windowGap: defaults.integer(forKey: DefaultsKey.windowLayoutWindowGap),
+            screenGap: defaults.integer(forKey: DefaultsKey.windowLayoutScreenGap))
+        if legacy.fitTightly {
             defaults.set(true, forKey: DefaultsKey.windowLayoutFitTightly)
+        }
+        if defaults.integer(forKey: DefaultsKey.windowLayoutWindowGap) != legacy.windowGap {
+            defaults.set(legacy.windowGap, forKey: DefaultsKey.windowLayoutWindowGap)
+        }
+        if defaults.integer(forKey: DefaultsKey.windowLayoutScreenGap) != legacy.screenGap {
+            defaults.set(legacy.screenGap, forKey: DefaultsKey.windowLayoutScreenGap)
         }
     }
 }

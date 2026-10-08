@@ -83,7 +83,6 @@ struct WindowCommandStrings {
     let ignoredSection: String
     let ignoredCaption: String
     let addApp: String
-    let addFrontmostFormat: String
     let noIgnoredApps: String
     let remove: String
 
@@ -225,7 +224,6 @@ struct WindowCommandStrings {
         ignoredSection: "Ignored Apps",
         ignoredCaption: "Shortcuts, dragging and both menus leave these apps’ windows alone.",
         addApp: "Add App…",
-        addFrontmostFormat: "Add %@",
         noIgnoredApps: "No ignored apps.",
         remove: "Remove",
         resetSection: "Reset",

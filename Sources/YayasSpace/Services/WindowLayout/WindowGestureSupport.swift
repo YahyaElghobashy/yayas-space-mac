@@ -339,11 +339,6 @@ enum WindowEdgeDragClassification: Equatable {
     case unrelated
 }
 
-struct WindowEdgeSnapScreen: Equatable {
-    let frame: CGRect
-    let visibleFrame: CGRect
-}
-
 /// The eight visible drop areas around the screen. Raw values are persisted,
 /// so they stay stable even if the visual arrangement changes later.
 enum WindowEdgeSnapZone: String, CaseIterable {
@@ -382,16 +377,7 @@ enum WindowEdgeSnapZone: String, CaseIterable {
     }
 }
 
-struct WindowEdgeSnapTarget: Equatable {
-    let zone: WindowEdgeSnapZone
-    let frame: CGRect
-    let visibleFrame: CGRect
-
-    var action: WindowLayoutAction { zone.action }
-}
-
 enum WindowEdgeSnapSupport {
-    static let activationDistance: CGFloat = 12
     static let resizeCornerDistance: CGFloat = 12
     static let resizeEdgeDistance: CGFloat = 5
     static let desktopAndDockSettingsURL = URL(
@@ -499,103 +485,6 @@ enum WindowEdgeSnapSupport {
         return alignment >= 0.6 && ratio >= 0.2 && ratio <= 1.8 ? .moving : .unrelated
     }
 
-    /// Resolves the hot zone under an AppKit-coordinate pointer. Screen frames
-    /// choose the reachable edge; visible frames keep the result clear of the
-    /// menu bar and Dock. A seam shared by two displays is not an edge, so a
-    /// window can cross it without being caught halfway through.
-    static func target(at point: CGPoint,
-                       screens: [WindowEdgeSnapScreen],
-                       distance: CGFloat = activationDistance,
-                       enabledZones: Set<WindowEdgeSnapZone> =
-                           WindowEdgeSnapZone.allEnabled) -> WindowEdgeSnapTarget? {
-        let ordered = screens.enumerated().sorted {
-            distanceSquared(from: point, to: $0.element.frame)
-                < distanceSquared(from: point, to: $1.element.frame)
-        }
-        for (index, screen) in ordered {
-            let frame = screen.frame
-            guard frame.width > 0, frame.height > 0,
-                  screen.visibleFrame.width > 0, screen.visibleFrame.height > 0,
-                  point.x >= frame.minX - distance,
-                  point.x <= frame.maxX + distance,
-                  point.y >= frame.minY - distance,
-                  point.y <= frame.maxY + distance
-            else { continue }
-
-            let otherFrames = screens.enumerated().compactMap { offset, value in
-                offset == index ? nil : value.frame
-            }
-            let nearLeft = abs(point.x - frame.minX) <= distance
-                && !hasNeighbor(beyond: .left, point: point, distance: distance, frames: otherFrames)
-            let nearRight = abs(point.x - frame.maxX) <= distance
-                && !hasNeighbor(beyond: .right, point: point, distance: distance, frames: otherFrames)
-            let visibleTop = min(max(screen.visibleFrame.maxY, frame.minY), frame.maxY)
-            let physicalTop = CGPoint(x: point.x, y: frame.maxY)
-            let nearTop = point.y >= visibleTop - distance
-                && point.y <= frame.maxY + distance
-                && !hasNeighbor(beyond: .top,
-                                point: physicalTop,
-                                distance: distance,
-                                frames: otherFrames)
-            let nearBottom = abs(point.y - frame.minY) <= distance
-                && !hasNeighbor(beyond: .bottom, point: point, distance: distance, frames: otherFrames)
-            guard nearLeft || nearRight || nearTop || nearBottom else { continue }
-
-            let horizontalCorner = horizontalCornerWidth(for: frame)
-            let verticalCorner = min(max(frame.height * 0.18, 80), 160)
-            let zone: WindowEdgeSnapZone
-            if nearTop {
-                if point.x <= frame.minX + horizontalCorner {
-                    zone = .topLeft
-                } else if point.x >= frame.maxX - horizontalCorner {
-                    zone = .topRight
-                } else {
-                    zone = .top
-                }
-            } else if nearBottom {
-                if point.x <= frame.minX + horizontalCorner {
-                    zone = .bottomLeft
-                } else if point.x >= frame.maxX - horizontalCorner {
-                    zone = .bottomRight
-                } else {
-                    zone = .bottom
-                }
-            } else if nearLeft {
-                if point.y >= frame.maxY - verticalCorner {
-                    zone = .topLeft
-                } else if point.y <= frame.minY + verticalCorner {
-                    zone = .bottomLeft
-                } else {
-                    zone = .left
-                }
-            } else {
-                if point.y >= frame.maxY - verticalCorner {
-                    zone = .topRight
-                } else if point.y <= frame.minY + verticalCorner {
-                    zone = .bottomRight
-                } else {
-                    zone = .right
-                }
-            }
-            guard enabledZones.contains(zone) else { return nil }
-
-            let action = zone.action
-            let targetFrame = WindowLayoutGeometry.rect(for: action,
-                                                        current: screen.visibleFrame,
-                                                        visibleFrame: screen.visibleFrame,
-                                                        windowGap: WindowLayoutGaps.windowGap,
-                                                        screenGap: WindowLayoutGaps.screenGap)
-            return WindowEdgeSnapTarget(zone: zone,
-                                        frame: targetFrame.integral,
-                                        visibleFrame: screen.visibleFrame)
-        }
-        return nil
-    }
-
-    private enum Edge {
-        case left, right, top, bottom
-    }
-
     private static func horizontalCornerWidth(for frame: CGRect) -> CGFloat {
         min(max(frame.width * 0.18, 96), 180)
     }
@@ -607,36 +496,11 @@ enum WindowEdgeSnapSupport {
         return .top
     }
 
-    private static func hasNeighbor(beyond edge: Edge,
-                                    point: CGPoint,
-                                    distance: CGFloat,
-                                    frames: [CGRect]) -> Bool {
-        var probe = point
-        switch edge {
-        case .left: probe.x -= distance + 1
-        case .right: probe.x += distance + 1
-        case .top: probe.y += distance + 1
-        case .bottom: probe.y -= distance + 1
-        }
-        return frames.contains { inclusiveContains($0, probe) }
-    }
-
     private static func sharesPerpendicularEdges(_ lhs: CGRect, _ rhs: CGRect) -> Bool {
         let sharesVerticalEdge = abs(lhs.minX - rhs.minX) <= sizeTolerance
             || abs(lhs.maxX - rhs.maxX) <= sizeTolerance
         let sharesHorizontalEdge = abs(lhs.minY - rhs.minY) <= sizeTolerance
             || abs(lhs.maxY - rhs.maxY) <= sizeTolerance
         return sharesVerticalEdge && sharesHorizontalEdge
-    }
-
-    private static func inclusiveContains(_ frame: CGRect, _ point: CGPoint) -> Bool {
-        point.x >= frame.minX && point.x <= frame.maxX
-            && point.y >= frame.minY && point.y <= frame.maxY
-    }
-
-    private static func distanceSquared(from point: CGPoint, to frame: CGRect) -> CGFloat {
-        let dx = max(frame.minX - point.x, 0, point.x - frame.maxX)
-        let dy = max(frame.minY - point.y, 0, point.y - frame.maxY)
-        return dx * dx + dy * dy
     }
 }

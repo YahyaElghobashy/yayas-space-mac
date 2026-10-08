@@ -91,11 +91,6 @@ enum WindowLayoutAction: String, CaseIterable, Identifiable {
         }
     }
 
-    init?(shortcutID: UInt32) {
-        guard let action = Self.allCases.first(where: { $0.shortcutID == shortcutID }) else { return nil }
-        self = action
-    }
-
     var shortcutKey: String {
         switch self {
         case .leftHalf: return DefaultsKey.windowLayoutShortcutLeft
@@ -182,12 +177,6 @@ enum WindowLayoutAction: String, CaseIterable, Identifiable {
         guard let storedValue else { return defaultShortcut }
         if storedValue == clearedShortcutStorageValue { return nil }
         return GlobalShortcut(storageValue: storedValue) ?? defaultShortcut
-    }
-
-    /// The action's effective shortcut; nil when the user removed it.
-    var savedShortcut: GlobalShortcut? {
-        Self.resolvedShortcut(storedValue: UserDefaults.standard.string(forKey: shortcutKey),
-                              defaultShortcut: defaultShortcut)
     }
 
     /// Which actions the user hid from the layout grid, parsed from the

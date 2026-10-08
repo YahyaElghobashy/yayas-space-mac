@@ -20,6 +20,7 @@ enum WindowCommandTests {
         menusAndPlacement(expect)
         restoreOnDrag(expect)
         persistence(expect)
+        storeCleanUp(expect)
         migration(expect)
         sync(expect)
     }
@@ -277,9 +278,10 @@ enum WindowCommandTests {
                "the shared-edge rule shaves half the margin off both inner edges")
         let newActions: [WindowLayoutAction] = [.centerTwoThirds, .topThird, .middleThird, .bottomThird,
                                                .topTwoThirds, .middleTwoThirds, .bottomTwoThirds]
-        expect(newActions.allSatisfy { WindowLayoutAction(shortcutID: $0.shortcutID) == $0
-                    && $0.defaultShortcut == nil && !$0.symbolName.isEmpty
-                    && !$0.title(FeatureStrings.windowLayout(.de)).isEmpty },
+        expect(newActions.allSatisfy { action in
+                    WindowLayoutAction.allCases.filter({ $0.shortcutID == action.shortcutID }) == [action]
+                    && action.defaultShortcut == nil && !action.symbolName.isEmpty
+                    && !action.title(FeatureStrings.windowLayout(.de)).isEmpty },
                "the new built-ins have their own ids, symbols and names and claim no legacy shortcut")
 
         var history = WindowLayoutHistory()
@@ -782,6 +784,54 @@ enum WindowCommandTests {
         defaults.removePersistentDomain(forName: suite)
     }
 
+    // MARK: Store clean-up
+
+    private static func storeCleanUp(_ expect: (Bool, String) -> Void) {
+        let suite = "yayasspace.tests.windowCommands.cleanup"
+        let defaults = UserDefaults(suiteName: suite)!
+        defaults.removePersistentDomain(forName: suite)
+        let store = WindowCommandStore(defaults: defaults) { _ in nil }
+        func hasStraySeparators(_ set: [WindowCommand]) -> Bool {
+            set.first?.isSeparator == true || set.last?.isSeparator == true
+                || zip(set, set.dropFirst()).contains { $0.isSeparator && $1.isSeparator }
+        }
+        // Emptying the display group leaves its two separators side by side.
+        let next = store.commands(.horizontal).first { $0.builtinID == .nextDisplay }!
+        let previous = store.commands(.horizontal).first { $0.builtinID == .previousDisplay }!
+        store.remove(next.id, in: .horizontal)
+        store.remove(previous.id, in: .horizontal)
+        let afterRemoval = store.commands(.horizontal)
+        let relaunched = WindowCommandStore(defaults: defaults) { _ in nil }
+        expect(!hasStraySeparators(afterRemoval) && relaunched.commands(.horizontal) == afterRemoval,
+               "emptying a group drops its spare separator at once, exactly as a relaunch reads the list")
+
+        let count = afterRemoval.count
+        let added = store.insertSeparator(in: .horizontal, near: afterRemoval[count - 1].id)
+        let withSeparator = store.commands(.horizontal)
+        expect(added != nil && withSeparator.count == count + 1 && withSeparator[count - 1].id == added
+                && !hasStraySeparators(withSeparator),
+               "a separator added after the last command goes just before it instead of dangling")
+
+        let before = store.commands(.horizontal)
+        let separator = before.first { $0.isSeparator }!
+        store.move(separator.id, to: before[before.count - 1].id, in: .horizontal)
+        store.move(separator.id, by: -100, in: .horizontal)
+        expect(store.commands(.horizontal) == before,
+               "a separator is never moved to an end of the list, where it would divide nothing")
+        store.insert(.separator(), in: .horizontal, after: before[before.count - 1].id)
+        expect(store.commands(.horizontal) == before,
+               "a dangling separator is cleaned away when it is added, not on the next launch")
+
+        let set = WindowCommandDefaults.commands(for: .horizontal)
+        typealias Editing = WindowCommandListEditing
+        expect(Editing.separatorInsertionIndex(in: set, near: set[0].id) == 1
+                && Editing.separatorInsertionIndex(in: set, near: set[set.count - 1].id) == set.count - 1
+                && Editing.separatorInsertionIndex(in: set, near: set[4].id) == nil
+                && Editing.separatorInsertionIndex(in: set, near: nil) == nil,
+               "a new separator goes after the selection, else before it, and never beside another")
+        defaults.removePersistentDomain(forName: suite)
+    }
+
     // MARK: Migration
 
     private static func migration(_ expect: (Bool, String) -> Void) {
@@ -849,6 +899,26 @@ enum WindowCommandTests {
         expect(again.commands(.horizontal).first?.effectiveShortcut == custom,
                "migration runs once: later launches keep the saved sets")
         defaults.removePersistentDomain(forName: suite)
+
+        // Unequal legacy gaps become one margin and a fit-tightly switch.
+        typealias Geometry = WindowCommandGeometry
+        expect(Geometry.normalizedLegacyGaps(windowGap: 16, screenGap: 8) == (16, false, 16, 16)
+                && Geometry.normalizedLegacyGaps(windowGap: 0, screenGap: 12) == (12, false, 12, 12)
+                && Geometry.normalizedLegacyGaps(windowGap: 24, screenGap: 0) == (24, true, 24, 0)
+                && Geometry.normalizedLegacyGaps(windowGap: 0, screenGap: 0) == (0, false, 0, 0)
+                && Geometry.normalizedLegacyGaps(windowGap: 300, screenGap: 0) == (128, true, 128, 0),
+               "the margin is the window gap when set, else the screen gap; a zero screen gap fits tightly")
+        let gapSuite = "yayasspace.tests.windowCommands.gaps"
+        let gapDefaults = UserDefaults(suiteName: gapSuite)!
+        gapDefaults.removePersistentDomain(forName: gapSuite)
+        gapDefaults.set(16, forKey: DefaultsKey.windowLayoutWindowGap)
+        gapDefaults.set(8, forKey: DefaultsKey.windowLayoutScreenGap)
+        _ = WindowCommandStore(defaults: gapDefaults) { _ in nil }
+        expect(gapDefaults.integer(forKey: DefaultsKey.windowLayoutWindowGap) == 16
+                && gapDefaults.integer(forKey: DefaultsKey.windowLayoutScreenGap) == 16
+                && !gapDefaults.bool(forKey: DefaultsKey.windowLayoutFitTightly),
+               "unequal legacy gaps are stored to match the single margin Settings shows")
+        gapDefaults.removePersistentDomain(forName: gapSuite)
     }
 
     // MARK: Sync

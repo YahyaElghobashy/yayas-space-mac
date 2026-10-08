@@ -469,8 +469,14 @@ struct WindowLayoutCommandsTab: View {
         insert(command)
     }
 
+    /// After the selected command, or before it when after would divide
+    /// nothing; the list never shows a separator a relaunch would drop.
     private func addSeparator() {
-        insert(.separator())
+        if let id = store.insertSeparator(in: kind, near: selectionModel.selected(in: kind)) {
+            selectionModel.select(id, in: kind)
+        } else {
+            NSSound.beep()
+        }
     }
 
     private func addBuiltin(_ action: WindowLayoutAction) {

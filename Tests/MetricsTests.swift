@@ -4331,30 +4331,26 @@ struct MetricsTests {
         // The native full screen action, wired like the sixths: real strings,
         // a stable id, and no system-wide key claimed until someone asks.
         expect(WindowLayoutAction.allCases.contains(.fullScreen)
-                && WindowLayoutAction.fullScreen.shortcutID == 53
-                && WindowLayoutAction(shortcutID: 53) == .fullScreen,
+                && WindowLayoutAction.fullScreen.shortcutID == 53,
                "full screen exists and answers to its own shortcut id")
         expect(WindowLayoutAction.fullScreen.defaultShortcut == nil
                 && Defaults.registeredDefaults[DefaultsKey.windowLayoutShortcutFullScreen] as? String
                     == WindowLayoutAction.clearedShortcutStorageValue,
                "full screen starts with no combination of its own")
         expect(WindowLayoutAction.allCases.contains(.previousDisplay)
-                && WindowLayoutAction.previousDisplay.shortcutID == 54
-                && WindowLayoutAction(shortcutID: 54) == .previousDisplay,
+                && WindowLayoutAction.previousDisplay.shortcutID == 54,
                "previous display exists and answers to its own shortcut id")
         expect(WindowLayoutAction.previousDisplay.defaultShortcut == nil,
                "previous display does not claim a new system-wide combination")
         expect(WindowLayoutAction.allCases.contains(.marginMaximize)
-                && WindowLayoutAction.marginMaximize.shortcutID == 55
-                && WindowLayoutAction(shortcutID: 55) == .marginMaximize,
+                && WindowLayoutAction.marginMaximize.shortcutID == 55,
                "margin maximize exists and answers to its own shortcut id")
         expect(WindowLayoutAction.marginMaximize.defaultShortcut == nil
                 && Defaults.registeredDefaults[DefaultsKey.windowLayoutShortcutMarginMaximize] as? String
                     == WindowLayoutAction.clearedShortcutStorageValue,
                "margin maximize starts with no combination of its own")
         expect(WindowLayoutAction.allCases.contains(.centerHalf)
-                && WindowLayoutAction.centerHalf.shortcutID == 57
-                && WindowLayoutAction(shortcutID: 57) == .centerHalf,
+                && WindowLayoutAction.centerHalf.shortcutID == 57,
                "center half exists and answers to its own shortcut id")
         expect(WindowLayoutAction.centerHalf.defaultShortcut == nil
                 && Defaults.registeredDefaults[DefaultsKey.windowLayoutShortcutCenterHalf] as? String
@@ -5732,40 +5728,6 @@ struct MetricsTests {
 
         let visibleFrame = CGRect(x: 0, y: 40, width: 1440, height: 860)
         let currentWindow = CGRect(x: 200, y: 200, width: 800, height: 500)
-        let snapVisibleFrame = CGRect(x: 0, y: 40, width: 1440, height: 835)
-        let snapScreen = WindowEdgeSnapScreen(frame: CGRect(x: 0, y: 0, width: 1440, height: 900),
-                                              visibleFrame: snapVisibleFrame)
-        func snapTarget(_ point: CGPoint,
-                        screens: [WindowEdgeSnapScreen] = [snapScreen],
-                        enabledZones: Set<WindowEdgeSnapZone> =
-                            WindowEdgeSnapZone.allEnabled) -> WindowEdgeSnapTarget? {
-            WindowEdgeSnapSupport.target(at: point,
-                                         screens: screens,
-                                         enabledZones: enabledZones)
-        }
-        let topSnapFrame = WindowLayoutGeometry.rect(for: .maximize,
-                                                     current: snapVisibleFrame,
-                                                     visibleFrame: snapVisibleFrame)
-        expect(snapTarget(CGPoint(x: 720, y: snapVisibleFrame.maxY))
-               == WindowEdgeSnapTarget(zone: .top,
-                                       frame: topSnapFrame,
-                                       visibleFrame: snapVisibleFrame),
-               "touching the lower edge of the menu bar previews maximize")
-        expect(snapTarget(CGPoint(x: 720, y: 900))?.action == .maximize,
-               "the full menu bar band remains a top snap target for maximize")
-        expect(snapTarget(CGPoint(x: 720, y: snapVisibleFrame.maxY - 13)) == nil,
-               "the top target does not reach below its activation band")
-        expect(snapTarget(CGPoint(x: 0, y: 450))?.action == .leftHalf
-               && snapTarget(CGPoint(x: 1440, y: 450))?.action == .rightHalf
-               && snapTarget(CGPoint(x: 720, y: 0))?.action == .bottomHalf,
-               "straight edges choose their matching placements")
-        expect(snapTarget(CGPoint(x: 0, y: snapVisibleFrame.maxY))?.action == .topLeft
-               && snapTarget(CGPoint(x: 1440, y: snapVisibleFrame.maxY))?.action == .topRight
-               && snapTarget(CGPoint(x: 0, y: 0))?.action == .bottomLeft
-               && snapTarget(CGPoint(x: 1440, y: 0))?.action == .bottomRight,
-               "inclusive screen corners take priority over straight edges")
-        expect(snapTarget(CGPoint(x: 720, y: 450)) == nil,
-               "dragging inside a display never creates a snap target")
 
         let disabledZoneStorage = WindowEdgeSnapZone.disabledZonesStorageValue([.right, .top])
         expect(disabledZoneStorage == "top,right"
@@ -5774,17 +5736,6 @@ struct MetricsTests {
                ) == Set([.top, .right]),
                "edge snap zones serialize visibly and discard unknown saved ids")
         let withoutTop = WindowEdgeSnapZone.enabledZones(from: disabledZoneStorage)
-        expect(snapTarget(CGPoint(x: 720, y: snapVisibleFrame.maxY),
-                          enabledZones: withoutTop) == nil
-               && snapTarget(CGPoint(x: 0, y: 450),
-                             enabledZones: withoutTop)?.zone == .left,
-               "turning off the top zone leaves the other visual snap areas active")
-        expect(WindowEdgeSnapSupport.target(
-                   at: CGPoint(x: 720, y: snapVisibleFrame.maxY),
-                   screens: [snapScreen],
-                   enabledZones: []
-               ) == nil,
-               "turning off every visual zone leaves no snap target")
 
         let quartzScreenFrame = CGRect(x: 0, y: 0, width: 1440, height: 900)
         let quartzTopCenter = CGPoint(x: 720, y: 0)
@@ -5806,31 +5757,6 @@ struct MetricsTests {
                ) == CGPoint(x: 20, y: 1),
                "an active top corner still protects its own snap gesture")
 
-        let leftSnapScreen = WindowEdgeSnapScreen(
-            frame: CGRect(x: -1280, y: 0, width: 1280, height: 800),
-            visibleFrame: CGRect(x: -1280, y: 25, width: 1280, height: 775)
-        )
-        expect(snapTarget(CGPoint(x: -1280, y: 400), screens: [leftSnapScreen])?.frame
-               == CGRect(x: -1280, y: 25, width: 640, height: 775),
-               "edge snapping keeps negative display origins and its visible frame")
-        let rightSnapScreen = WindowEdgeSnapScreen(
-            frame: CGRect(x: 1440, y: 0, width: 1920, height: 1080),
-            visibleFrame: CGRect(x: 1440, y: 40, width: 1920, height: 1040)
-        )
-        expect(snapTarget(CGPoint(x: 1440, y: 450),
-                          screens: [snapScreen, rightSnapScreen]) == nil,
-               "a shared display seam stays open for moving a window across")
-        expect(WindowEdgeSnapSupport.target(at: CGPoint(x: 1415, y: 450),
-                                            screens: [snapScreen, rightSnapScreen],
-                                            distance: 30) == nil,
-               "the whole activation band around a shared seam stays open")
-        let upperSnapScreen = WindowEdgeSnapScreen(
-            frame: CGRect(x: 0, y: 900, width: 1280, height: 800),
-            visibleFrame: CGRect(x: 0, y: 900, width: 1280, height: 775)
-        )
-        expect(snapTarget(CGPoint(x: 720, y: snapVisibleFrame.maxY),
-                          screens: [snapScreen, upperSnapScreen]) == nil,
-               "a menu bar boundary below another display remains an open seam")
         expect(WindowEdgeSnapSupport.systemTilingEnabled { _ in nil },
                "unwritten system tiling choices keep their enabled default")
         expect(!WindowEdgeSnapSupport.systemTilingEnabled { _ in false },

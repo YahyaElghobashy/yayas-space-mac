@@ -75,6 +75,19 @@ enum WindowCommandGeometry {
         let clamped = min(max(0, margin), 128)
         return (clamped, fitTightly ? 0 : clamped)
     }
+
+    /// The single margin and "fit tightly" switch an earlier pair of gap
+    /// settings becomes, with the gap values that match them: the margin is
+    /// the window gap when there is one, else the screen gap, and a zero
+    /// screen gap beside a window gap means fitting tightly.
+    static func normalizedLegacyGaps(windowGap: Int,
+                                     screenGap: Int) -> (margin: Int, fitTightly: Bool,
+                                                         windowGap: Int, screenGap: Int) {
+        let margin = min(max(0, windowGap > 0 ? windowGap : screenGap), 128)
+        let fitTightly = screenGap <= 0 && windowGap > 0
+        let stored = Self.gaps(margin: margin, fitTightly: fitTightly)
+        return (margin, fitTightly, stored.windowGap, stored.screenGap)
+    }
 }
 
 /// Which command, if any, a dragged window's pointer is asking for.
@@ -400,6 +413,24 @@ enum WindowCommandRouting {
         }
         guard let first = shortcuts.first, shortcuts.allSatisfy({ $0 == first }) else { return nil }
         return first
+    }
+}
+
+/// Editing rules of the Commands list.
+enum WindowCommandListEditing {
+    /// Where a new separator goes beside the selected command: right after
+    /// it, or right before it when after would put the separator at an end
+    /// of the list or next to another one. Nil when neither divides two
+    /// groups.
+    static func separatorInsertionIndex(in set: [WindowCommand], near id: UUID?) -> Int? {
+        func divides(at index: Int) -> Bool {
+            guard index > 0, index < set.count else { return false }
+            return !set[index - 1].isSeparator && !set[index].isSeparator
+        }
+        guard let id, let selected = set.firstIndex(where: { $0.id == id }) else { return nil }
+        if divides(at: selected + 1) { return selected + 1 }
+        if divides(at: selected) { return selected }
+        return nil
     }
 }
 
