@@ -1579,14 +1579,21 @@ struct AboutSettings: View {
     @ObservedObject private var l10n = L10n.shared
 
     var body: some View {
-        Form {
-            Section {
-                aboutContent
-            }
+        VStack(spacing: 0) {
+            Form {
+                Section {
+                    aboutContent
+                }
 
-            UpdatesView()
+                UpdatesView()
+            }
+            .formStyle(.grouped)
+
+            MadeByFooter()
+                .padding(.horizontal, 20)
+                .padding(.top, 4)
+                .padding(.bottom, 18)
         }
-        .formStyle(.grouped)
     }
 
     private var aboutContent: some View {
