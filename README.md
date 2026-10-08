@@ -173,18 +173,18 @@ Window Layout moves and sizes the window in front. Its shortcuts, drag snapping 
 
 - **Commands you can edit.** Every placement is a command. Its target is a rectangle on a 24 × 12 grid of the screen, it can have a shortcut and a drag area, and you choose whether it shows in the menu-bar menu and in the green-button menu. Add as many of your own as you like, add separators, reorder, delete, and restore the defaults at any time.
 - **Landscape and portrait.** Each kind of display has its own command set, so thirds run across a wide screen and down a tall one. Yaya's Space uses the set that matches the display the window is on.
-- **Drag to snap.** Drag a title bar to a screen edge or corner and a preview shows where the window will land; let go to place it. By default the sides take halves, the top takes Maximize, the corners take quarters, and the bottom edge is cut into five spans, so sliding along it walks through the thirds and two-thirds. Adjust how wide the edge areas are, how large the inner areas are, whether every area lights up while you drag, and the colour and outline of the preview. Drag a placed window away and it goes back to its earlier size.
-- **Green-button menu.** Rest the pointer on a window's green button and your chosen commands open in a menu after a delay you set (100 ms by default), as a list or as a compact grid.
+- **Drag to snap.** Drag a title bar to a screen edge or corner and a preview shows where the window will land; let go to place it. By default the sides take halves, the top takes Maximize, the corners take quarters, and the bottom edge is cut into five spans, so sliding along it walks through the thirds and two-thirds. Adjust how wide the edge areas are, how large the inner areas are, whether every area lights up while you drag, and the colour and outline of the preview. A window placed by a shortcut, a menu or a drag goes back to its earlier size when you drag it away, even with drag snapping off.
+- **Green-button menu.** Rest the pointer on a window's green button and your chosen commands open in a menu after a delay you set (100 ms by default), as a list or as a compact grid. Move through it with the arrow keys and press Return, or close it with Escape.
 - **Menu-bar menu.** A separate Window Layout icon, shown by default, lists your commands with their shortcuts, greys out what cannot change the window in front, and can ignore the app in front so Window Layout leaves it alone. You can hide the icon.
 - **Spacing.** Margins between windows, and an option to fit windows tightly to the screen edges.
-- **Settings file and sync.** Export or import every Window Layout setting as one file, or pick a sync folder (iCloud Drive, Dropbox, a network share) that Yaya's Space keeps up to date. The folder's own app carries the file between Macs and the newer change wins. Yaya's Space itself makes no network request for this.
+- **Settings file and sync.** Export or import every Window Layout setting as one file, or pick a sync folder (iCloud Drive, Dropbox, a network share) that Yaya's Space keeps up to date. The folder's own app carries the file between Macs and the newer change wins. A sync file that is still downloading from the cloud is skipped until it is on this Mac, so the app never waits on it. Yaya's Space itself makes no network request for this.
 
 | Default shortcut | Command |
 |---|---|
 | ⌃⌥← ⌃⌥→ ⌃⌥↑ ⌃⌥↓ | Left, right, top and bottom half |
 | ⌃⌥U ⌃⌥I ⌃⌥J ⌃⌥K | Top left, top right, bottom left and bottom right quarter |
-| ⌃⌥D ⌃⌥F ⌃⌥G | First, middle and last third |
-| ⌃⌥E ⌃⌥R ⌃⌥T | First, middle and last two-thirds |
+| ⌃⌥D ⌃⌥F ⌃⌥G | Left, center and right third (top, center and bottom on a portrait display) |
+| ⌃⌥E ⌃⌥R ⌃⌥T | Left, center and right two-thirds (top, center and bottom on a portrait display) |
 | ⌃⌥⌘→ ⌃⌥⌘← | Next and previous display |
 | ⌃⌥↩ ⌃⌥C ⌃⌥⌫ | Maximize, center and restore |
 

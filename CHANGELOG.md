@@ -8,18 +8,24 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 - **Editable window commands.** Window Layout's placements are now commands you can edit. Each one has a target rectangle on a 24 × 12 grid of the screen, an optional shortcut, an optional drag area, and switches for showing it in the menu-bar menu and in the green-button menu. Add your own commands and separators, reorder them, delete any of them, and restore the defaults.
-- **Landscape and portrait sets.** Portrait displays get their own command set (top, middle and bottom thirds and two-thirds), chosen automatically from the display a window is on.
-- **Center two-thirds**, and middle thirds and two-thirds on portrait displays.
-- **Drag areas for every command.** Screen-edge spans, corners and inner areas, drawn on a grid in each command's editor, with a live preview of where the window will land, an option to light up every area while you drag, adjustable edge width and inner-area size, and the preview's colour and outline. A placed window dragged away goes back to its earlier size.
-- **Green-button menu.** Rest the pointer on a window's green button to open the commands you marked for it, after a delay you set, as a list or a compact grid.
+- **Landscape and portrait sets.** Portrait displays get their own command set (top, center and bottom thirds and two-thirds), chosen automatically from the display a window is on.
+- **Center Two Thirds**, and the top, center and bottom thirds and two-thirds of a portrait display.
+- **Drag areas for every command.** Screen-edge spans, corners and inner areas, drawn on a grid in each command's editor, with a live preview of where the window will land, an option to light up every area while you drag, adjustable edge width and inner-area size, and the preview's colour and outline. A window placed by a shortcut, a menu or a drag goes back to its earlier size when you drag it away, with drag snapping on or off.
+- **Green-button menu.** Rest the pointer on a window's green button to open the commands you marked for it, after a delay you set, as a list or a compact grid. The arrow keys, Return and Escape work in it, and VoiceOver reads each command as a button.
 - **Window Layout menu-bar menu.** Its own icon lists your commands with their shortcuts, greys out what cannot change the window in front, and can ignore the app in front. The icon is shown by default and can be hidden.
-- **Ignored apps.** Window Layout leaves the apps you list alone on every route: shortcuts, drags and both menus.
+- **Ignored apps.** Window Layout leaves the apps you list alone on every route: shortcuts, drags, both menus, the menu-panel grid, the radial menu, the command bar and the window gestures.
 - **Spacing.** Window margins, and an option to fit windows tightly to the screen edges.
-- **Settings file and sync folder.** Export and import every Window Layout setting as one file, or keep it in a folder synced by iCloud Drive, Dropbox or a network share. The newer change wins. No network code was added.
+- **Settings file and sync folder.** Export and import every Window Layout setting as one file, or keep it in a folder synced by iCloud Drive, Dropbox or a network share. The newer change wins. Files are read and written in the background, and a sync file that is still downloading from the cloud is skipped until it is on this Mac, so the app never waits on it. No network code was added.
 - **New Settings layout** for Window Layout, with General and Commands tabs, and a notice with a Quit button while another window manager is running.
 
 ### Changed
-- **Restore** moved from ⌃⌥R to ⌃⌥⌫, so ⌃⌥R can place the window on the middle two-thirds. Shortcuts you had changed yourself are carried over unchanged.
+- **Default shortcuts.** If you already used Window Layout's shortcuts, these defaults are new or different once you switch them on again (shortcuts you had changed yourself are carried over unchanged):
+  - ⌃⌥⌫ is new: Restore moved here from ⌃⌥R.
+  - ⌃⌥R now places the window on the center two-thirds instead of restoring it.
+  - ⌃⌥⌘← is new: Previous Display, which had no shortcut before. ⌃⌥⌘→ stays Next Display.
+  - On a portrait display, ⌃⌥D, F, G and ⌃⌥E, R, T now place the top, center and bottom third and two-thirds (rows) instead of the left, center and right ones (columns).
+- **Margins.** The earlier window gap and screen gap become one margin plus the "fit tightly to screen edges" switch: the margin is your window gap, or your screen gap when there was no window gap, and fitting tightly is on when the screen gap was zero. Both gaps are stored to match, so a 16 pt window gap with an 8 pt screen gap becomes a 16 pt margin all round.
+- **Placement names.** The menu-panel grid, the radial menu and the command bar use the command names (Left Third, Center Two Thirds, Top Left Sixth and so on) instead of the short titles; the command bar still finds the old ones. Picking a placement there runs your own command for it, so an edited area or a new shortcut is what you get.
 - Window Layout's shortcuts, drag snapping and green-button menu stay off after updating, so the update never fights another window manager you still run. The new menu-bar icon is shown; its commands act only when you choose one.
 
 ## [1.0.2] - 2026-10-08
