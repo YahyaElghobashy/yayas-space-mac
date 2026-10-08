@@ -462,6 +462,18 @@ enum WindowGreenButtonMenuPlacement {
         return clamped(beside)
     }
 
+    /// The way from the button to the menu, which counts as inside for the
+    /// leave timer: the button, the part of the menu nearest to it and the
+    /// band between them. The pointer crosses it, sometimes over the
+    /// system's own menu, on its way to ours; the rest of the system's
+    /// menu stays outside, so resting there still closes ours.
+    static func corridor(buttonFrame button: CGRect, menuFrame menu: CGRect, reach: CGFloat = 24) -> CGRect {
+        let center = CGPoint(x: button.midX, y: button.midY)
+        let nearest = CGPoint(x: min(max(center.x, menu.minX), menu.maxX),
+                              y: min(max(center.y, menu.minY), menu.maxY))
+        let landing = CGRect(x: nearest.x - reach, y: nearest.y - reach, width: reach * 2, height: reach * 2)
+        return button.union(landing)
+    }
 }
 
 /// Which parts of window dragging run. Drag snapping previews and places a

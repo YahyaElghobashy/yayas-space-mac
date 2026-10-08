@@ -631,6 +631,22 @@ enum WindowCommandTests {
         let flippedFootprint = footprint.offsetBy(dx: nearRight.minX - button.minX, dy: 0)
         expect(!flipped.intersects(flippedFootprint) && flipped.maxX <= nearRight.minX,
                "without room on the right it opens to the left of the window")
+
+        // The corridor from the button to the menu counts as inside.
+        let corridor = WindowGreenButtonMenuPlacement.corridor(buttonFrame: button, menuFrame: beside)
+        let start = CGPoint(x: button.midX, y: button.midY)
+        let landing = CGPoint(x: beside.minX + 4, y: beside.maxY - 4)
+        let onTheWay = (1...9).map { step -> CGPoint in
+            let t = CGFloat(step) / 10
+            return CGPoint(x: start.x + (landing.x - start.x) * t, y: start.y + (landing.y - start.y) * t)
+        }
+        expect(onTheWay.allSatisfy(corridor.contains),
+               "the way from the green button to the menu beside the system's menu keeps it open")
+        expect(!corridor.contains(CGPoint(x: button.minX + 100, y: button.minY - 200)),
+               "resting deep inside the system's own menu still lets the menu close")
+        let below = WindowGreenButtonMenuPlacement.corridor(buttonFrame: button, menuFrame: plain)
+        expect(below.contains(CGPoint(x: button.midX, y: button.minY - 4)),
+               "a menu dropping down from the button keeps the gap between them inside")
     }
 
     // MARK: Restore on drag

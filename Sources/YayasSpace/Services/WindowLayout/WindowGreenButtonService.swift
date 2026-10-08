@@ -7,9 +7,11 @@ import ApplicationServices
 /// Opens a menu of commands when the pointer rests on a window's green
 /// (zoom) button. Cheap by construction: the global monitor only records
 /// that the pointer moved; one timer waits until it has been still for the
-/// hover delay, and only then asks Accessibility what is under it, once per
-/// resting spot and never faster than ~30 Hz. A pointer that keeps moving
-/// never triggers a single Accessibility call.
+/// hover delay, then asks the window server, never faster than ~30 Hz,
+/// which ordinary window is in front under the pointer. Only a pointer
+/// resting in that window's traffic-light corner goes on to ask
+/// Accessibility what is under it. A pointer that keeps moving, or rests
+/// anywhere else, never triggers a single Accessibility call.
 final class WindowGreenButtonService {
     static let shared = WindowGreenButtonService()
 
@@ -20,6 +22,10 @@ final class WindowGreenButtonService {
     private var lastHitTestAt: TimeInterval = 0
     private var lastTestedPoint: CGPoint?
     private var menu: WindowGreenButtonMenuController?
+    /// The hover delay, read once and again only when its preference
+    /// changes, never on a pointer move.
+    private var hoverDelay = WindowGreenButtonService.storedHoverDelay()
+    private var delayObserver: WindowLayoutDefaultsObserver?
 
     private init() {}
 
@@ -31,6 +37,10 @@ final class WindowGreenButtonService {
 
     private func start() {
         guard moveMonitor == nil else { return }
+        hoverDelay = Self.storedHoverDelay()
+        delayObserver = WindowLayoutDefaultsObserver(keys: [DefaultsKey.windowLayoutGreenButtonDelay]) {
+            DispatchQueue.main.async { [weak self] in self?.hoverDelay = Self.storedHoverDelay() }
+        }
         moveMonitor = NSEvent.addGlobalMonitorForEvents(matching: [.mouseMoved]) { [weak self] _ in
             self?.pointerMoved()
         }
@@ -46,13 +56,14 @@ final class WindowGreenButtonService {
         if let clickMonitor { NSEvent.removeMonitor(clickMonitor) }
         moveMonitor = nil
         clickMonitor = nil
+        delayObserver = nil
         restTimer?.invalidate()
         restTimer = nil
         lastTestedPoint = nil
         closeMenu()
     }
 
-    private var hoverDelay: TimeInterval {
+    private static func storedHoverDelay() -> TimeInterval {
         let milliseconds = WindowGreenButtonMenuLayout.sanitizedDelay(
             UserDefaults.standard.integer(forKey: DefaultsKey.windowLayoutGreenButtonDelay))
         return max(WindowGreenButtonMenuLayout.minimumRest, Double(milliseconds) / 1_000)
@@ -110,10 +121,17 @@ final class WindowGreenButtonService {
     }
 
     private func hitTest(at point: CGPoint) {
-        guard AXIsProcessTrusted(),
-              UserDefaults.standard.bool(forKey: DefaultsKey.windowLayoutGreenButtonMenuEnabled)
-        else { return }
+        guard AXIsProcessTrusted() else { return }
         let quartz = CGPoint(x: point.x, y: Self.primaryScreenTop - point.y)
+        // The window server first: the front-most ordinary window under the
+        // pointer, and only if the pointer rests in its traffic-light corner.
+        // Ignored apps, Yaya's Space itself and agents end the search there.
+        let ignored = WindowLayoutService.shared.ignoredBundleIDs
+        guard let candidate = WindowServerTrafficLightHitTest.candidate(at: quartz, button: .zoom, pidIsEligible: { pid in
+            guard let app = NSRunningApplication(processIdentifier: pid) else { return false }
+            return !app.isTerminated && app.activationPolicy == .regular
+                && !WindowLayoutIgnoreList.contains(app.bundleIdentifier, in: ignored)
+        }) else { return }
         var raw: AXUIElement?
         guard AXUIElementCopyElementAtPosition(AXUIElementCreateSystemWide(),
                                                Float(quartz.x), Float(quartz.y), &raw) == .success,
@@ -126,10 +144,8 @@ final class WindowGreenButtonService {
         else { return }
         var pid = pid_t(0)
         guard AXUIElementGetPid(button, &pid) == .success,
-              pid != ProcessInfo.processInfo.processIdentifier,
-              let app = NSRunningApplication(processIdentifier: pid),
-              !app.isTerminated,
-              !WindowLayoutService.shared.isIgnored(bundleID: app.bundleIdentifier),
+              pid == candidate.pid,
+              AXWindowResolver.windowID(for: window).map({ $0 == candidate.windowID }) ?? true,
               !Self.bool(window, "AXFullScreen"),
               let buttonFrame = Self.frame(of: button)
         else { return }
@@ -259,12 +275,20 @@ struct WindowGreenButtonMenuItem {
 
 /// The open menu: a non-activating panel beside the green button. It closes
 /// on a choice, on a click elsewhere, on Escape, or shortly after the
-/// pointer leaves both the panel and the button.
+/// pointer leaves the panel, the button and the corridor between them.
+///
+/// The keyboard: once the pointer is over the menu, or the first time an
+/// arrow key, Return or Escape is pressed while it is open, the panel takes
+/// the keyboard without activating Yaya's Space. The arrows then move the
+/// highlight, Return applies the highlighted command and Escape closes the
+/// menu. Until then the app in front keeps its keystrokes, so a menu opened
+/// by a pointer that merely rested on the button never swallows typing.
 final class WindowGreenButtonMenuController {
     var onChoose: ((WindowCommand) -> Void)?
     var onClose: (() -> Void)?
 
-    private let panel: NSPanel
+    private let panel: WindowGreenButtonMenuPanel
+    private let content: WindowGreenButtonMenuView
     private let buttonFrame: CGRect
     private var leaveTimer: Timer?
     private var keyMonitor: Any?
@@ -277,15 +301,16 @@ final class WindowGreenButtonMenuController {
          visibleFrame: CGRect) {
         self.buttonFrame = buttonFrame
         let content = WindowGreenButtonMenuView(items: items, layout: layout, grid: grid)
+        self.content = content
         let size = content.preferredSize
         let frame = WindowGreenButtonMenuPlacement.frame(buttonFrame: buttonFrame,
                                                          menuSize: size,
                                                          visibleFrame: visibleFrame,
                                                          reservesSystemMenu: true)
-        panel = NSPanel(contentRect: frame,
-                        styleMask: [.borderless, .nonactivatingPanel],
-                        backing: .buffered,
-                        defer: false)
+        panel = WindowGreenButtonMenuPanel(contentRect: frame,
+                                           styleMask: [.borderless, .nonactivatingPanel],
+                                           backing: .buffered,
+                                           defer: false)
         panel.isOpaque = false
         panel.backgroundColor = .clear
         panel.hasShadow = true
@@ -313,15 +338,23 @@ final class WindowGreenButtonMenuController {
         panel.contentView = background
 
         content.onChoose = { [weak self] command in self?.onChoose?(command) }
+        content.onClose = { [weak self] in self?.close() }
         content.onHoverChange = { [weak self] inside in
-            if inside { self?.cancelLeave() } else { self?.scheduleLeave() }
+            if inside {
+                self?.cancelLeave()
+                self?.takeKeyboard()
+            } else {
+                self?.scheduleLeave()
+            }
         }
     }
 
     func show() {
         panel.orderFrontRegardless()
+        // Watches keys meant for the app in front, without taking them: the
+        // first arrow, Return or Escape hands the keyboard to the menu.
         keyMonitor = NSEvent.addGlobalMonitorForEvents(matching: [.keyDown]) { [weak self] event in
-            if event.keyCode == 53 { self?.close() } // Escape
+            self?.keyPressedElsewhere(event)
         }
     }
 
@@ -337,14 +370,39 @@ final class WindowGreenButtonMenuController {
     }
 
     /// Global pointer moves while open (the panel's own area reports through
-    /// its tracking area instead).
+    /// its tracking area instead). The corridor from the button to the menu
+    /// counts as inside, so crossing it, even over the system's own
+    /// green-button menu, never closes the menu on the way.
     func pointerMoved(to point: CGPoint) {
         if panel.frame.insetBy(dx: -6, dy: -6).contains(point)
-            || buttonFrame.insetBy(dx: -4, dy: -4).contains(point) {
+            || buttonFrame.insetBy(dx: -4, dy: -4).contains(point)
+            || WindowGreenButtonMenuPlacement.corridor(buttonFrame: buttonFrame,
+                                                       menuFrame: panel.frame).contains(point) {
             cancelLeave()
         } else {
             scheduleLeave()
         }
+    }
+
+    private func keyPressedElsewhere(_ event: NSEvent) {
+        guard !closed else { return }
+        switch event.keyCode {
+        case 53: // Escape
+            close()
+        case 123, 124, 125, 126, 36, 76: // arrows, Return, Enter
+            takeKeyboard()
+            content.handleKey(event.keyCode)
+        default:
+            break
+        }
+    }
+
+    /// Makes the panel the key window without activating Yaya's Space, so
+    /// the arrows, Return and Escape reach the menu.
+    private func takeKeyboard() {
+        guard !closed, !panel.isKeyWindow else { return }
+        panel.makeKey()
+        panel.makeFirstResponder(content)
     }
 
     private func scheduleLeave() {
@@ -363,9 +421,32 @@ final class WindowGreenButtonMenuController {
     }
 }
 
-/// Draws the menu's items, list or grid, and reports hovering and choices.
+/// A borderless panel may only take the keyboard when it says so.
+private final class WindowGreenButtonMenuPanel: NSPanel {
+    override var canBecomeKey: Bool { true }
+    override var canBecomeMain: Bool { false }
+}
+
+/// One command of the open menu as Accessibility sees it: a button that
+/// VoiceOver can read and press.
+private final class WindowGreenButtonMenuElement: NSAccessibilityElement {
+    var onPress: (() -> Bool)?
+    var frameOnScreen: (() -> CGRect)?
+
+    override func accessibilityFrame() -> NSRect {
+        frameOnScreen?() ?? .zero
+    }
+
+    override func accessibilityPerformPress() -> Bool {
+        onPress?() ?? false
+    }
+}
+
+/// Draws the menu's items, list or grid, reports hovering and choices, and
+/// answers the keyboard and Accessibility for them.
 private final class WindowGreenButtonMenuView: NSView {
     var onChoose: ((WindowCommand) -> Void)?
+    var onClose: (() -> Void)?
     var onHoverChange: ((Bool) -> Void)?
 
     private let items: [WindowGreenButtonMenuItem]
@@ -373,7 +454,9 @@ private final class WindowGreenButtonMenuView: NSView {
     private let grid: WindowGrid
     private var slots: [(index: Int, rect: CGRect)] = []
     private var separators: [CGRect] = []
+    /// The highlighted item, by the pointer or the keyboard.
     private var hovered: Int?
+    private var accessibilityItems: [WindowGreenButtonMenuElement] = []
     private(set) var preferredSize = CGSize(width: 200, height: 40)
 
     private static let padding: CGFloat = 6
@@ -386,6 +469,7 @@ private final class WindowGreenButtonMenuView: NSView {
 
     override var isFlipped: Bool { true }
     override var isOpaque: Bool { false }
+    override var acceptsFirstResponder: Bool { true }
 
     /// Menus print the named keys as the caps on the keyboard.
     static func compactText(_ shortcut: GlobalShortcut) -> String {
@@ -402,7 +486,7 @@ private final class WindowGreenButtonMenuView: NSView {
         self.grid = grid
         super.init(frame: .zero)
         buildLayout()
-        setAccessibilityRole(.menu)
+        buildAccessibility()
     }
 
     required init?(coder: NSCoder) { nil }
@@ -457,6 +541,43 @@ private final class WindowGreenButtonMenuView: NSView {
         }
     }
 
+    // MARK: Accessibility
+
+    /// A group of buttons, one per command, in list order; separators are
+    /// left out. Each reads its name and shortcut and can be pressed.
+    private func buildAccessibility() {
+        setAccessibilityElement(true)
+        setAccessibilityRole(.group)
+        setAccessibilityLabel(WindowCommandStrings.localized(L10n.shared.language).statusItemTitle)
+        accessibilityItems = slots.map { slot in
+            let item = items[slot.index]
+            let element = WindowGreenButtonMenuElement()
+            element.setAccessibilityRole(.button)
+            element.setAccessibilityLabel(item.title)
+            if let shortcut = item.command.effectiveShortcut {
+                element.setAccessibilityHelp(Self.compactText(shortcut))
+            }
+            element.setAccessibilityEnabled(item.isEnabled)
+            element.setAccessibilityParent(self)
+            element.frameOnScreen = { [weak self] in
+                guard let self, let window = self.window else { return .zero }
+                return window.convertToScreen(self.convert(slot.rect, to: nil))
+            }
+            element.onPress = { [weak self] in
+                guard let self, item.isEnabled else { return false }
+                self.onChoose?(item.command)
+                return true
+            }
+            return element
+        }
+    }
+
+    override func accessibilityChildren() -> [Any]? {
+        accessibilityItems
+    }
+
+    // MARK: Pointer
+
     override func updateTrackingAreas() {
         super.updateTrackingAreas()
         trackingAreas.forEach(removeTrackingArea)
@@ -484,10 +605,84 @@ private final class WindowGreenButtonMenuView: NSView {
         onChoose?(items[slot.index].command)
     }
 
+    // MARK: Keyboard
+
+    override func keyDown(with event: NSEvent) {
+        if !handleKey(event.keyCode) { super.keyDown(with: event) }
+    }
+
+    override func cancelOperation(_ sender: Any?) {
+        onClose?()
+    }
+
+    /// Arrows move the highlight between the commands that can act, Return
+    /// or Enter applies it, Escape closes. True when the key was used.
+    @discardableResult
+    func handleKey(_ keyCode: UInt16) -> Bool {
+        switch keyCode {
+        case 53: // Escape
+            onClose?()
+        case 36, 76: // Return, Enter
+            if let hovered, items[hovered].isEnabled { onChoose?(items[hovered].command) }
+        case 125: moveHighlight(dx: 0, dy: 1) // down
+        case 126: moveHighlight(dx: 0, dy: -1) // up
+        case 124: moveHighlight(dx: 1, dy: 0) // right
+        case 123: moveHighlight(dx: -1, dy: 0) // left
+        default:
+            return false
+        }
+        return true
+    }
+
+    private func moveHighlight(dx: Int, dy: Int) {
+        let enabled = slots.filter { items[$0.index].isEnabled }
+        guard !enabled.isEmpty else { return }
+        guard let current = hovered, let from = enabled.first(where: { $0.index == current }) else {
+            // Nothing highlighted yet: start from the first or the last.
+            setHovered((dx + dy >= 0 ? enabled.first : enabled.last)?.index)
+            return
+        }
+        let next: (index: Int, rect: CGRect)?
+        switch layout {
+        case .list:
+            // Up and left go back, down and right go on; the ends wrap.
+            let position = enabled.firstIndex { $0.index == from.index } ?? 0
+            let step = (dx + dy) >= 0 ? 1 : -1
+            next = enabled[(position + step + enabled.count) % enabled.count]
+        case .grid:
+            next = nearest(from: from.rect, dx: dx, dy: dy, among: enabled)
+        }
+        if let next { setHovered(next.index) }
+    }
+
+    /// The nearest enabled cell in a direction on the grid, preferring the
+    /// same row or column.
+    private func nearest(from rect: CGRect, dx: Int, dy: Int,
+                         among enabled: [(index: Int, rect: CGRect)]) -> (index: Int, rect: CGRect)? {
+        let candidates = enabled.filter { slot in
+            if dx > 0 { return slot.rect.midX > rect.midX + 1 }
+            if dx < 0 { return slot.rect.midX < rect.midX - 1 }
+            if dy > 0 { return slot.rect.midY > rect.midY + 1 }
+            return slot.rect.midY < rect.midY - 1
+        }
+        return candidates.min { lhs, rhs in
+            func cost(_ slot: (index: Int, rect: CGRect)) -> CGFloat {
+                let along = dx != 0 ? abs(slot.rect.midX - rect.midX) : abs(slot.rect.midY - rect.midY)
+                let across = dx != 0 ? abs(slot.rect.midY - rect.midY) : abs(slot.rect.midX - rect.midX)
+                return along + across * 4
+            }
+            return cost(lhs) < cost(rhs)
+        }
+    }
+
     private func setHovered(_ index: Int?) {
         guard index != hovered else { return }
         hovered = index
         needsDisplay = true
+        if let index, let slotPosition = slots.firstIndex(where: { $0.index == index }),
+           accessibilityItems.indices.contains(slotPosition) {
+            NSAccessibility.post(element: accessibilityItems[slotPosition], notification: .focusedUIElementChanged)
+        }
     }
 
     override func draw(_ dirtyRect: NSRect) {
