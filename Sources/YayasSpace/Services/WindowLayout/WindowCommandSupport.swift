@@ -756,3 +756,13 @@ enum WindowGreenButtonMenuLayout: String, CaseIterable, Identifiable {
     /// the pointer has to rest this long before anything is asked.
     static let minimumRest: TimeInterval = 1.0 / 30.0
 }
+
+/// What the green-button menu accepts as the green button under the pointer,
+/// from the Accessibility role and subrole of the element there. A window
+/// that can go full screen, most of them, reports its green button as the
+/// full-screen button; one that can only zoom, as the zoom button.
+enum WindowGreenButtonIdentity {
+    static func isGreenButton(role: String?, subrole: String?) -> Bool {
+        role == "AXButton" && (subrole == "AXZoomButton" || subrole == "AXFullScreenButton")
+    }
+}

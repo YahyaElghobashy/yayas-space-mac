@@ -716,6 +716,20 @@ enum WindowCommandTests {
         let below = WindowGreenButtonMenuPlacement.corridor(buttonFrame: button, menuFrame: plain)
         expect(below.contains(CGPoint(x: button.midX, y: button.minY - 4)),
                "a menu dropping down from the button keeps the gap between them inside")
+
+        // A window that can go full screen, most of them, reports its green
+        // button as the full-screen button; one that can only zoom, as the
+        // zoom button. Both open the menu; the other lights never do.
+        expect(WindowGreenButtonIdentity.isGreenButton(role: "AXButton", subrole: "AXFullScreenButton"),
+               "the green button of a window that can go full screen opens the menu")
+        expect(WindowGreenButtonIdentity.isGreenButton(role: "AXButton", subrole: "AXZoomButton"),
+               "the green button of a window that can only zoom opens the menu")
+        expect(!WindowGreenButtonIdentity.isGreenButton(role: "AXButton", subrole: "AXCloseButton")
+               && !WindowGreenButtonIdentity.isGreenButton(role: "AXButton", subrole: "AXMinimizeButton")
+               && !WindowGreenButtonIdentity.isGreenButton(role: "AXButton", subrole: nil)
+               && !WindowGreenButtonIdentity.isGreenButton(role: "AXStaticText", subrole: nil)
+               && !WindowGreenButtonIdentity.isGreenButton(role: nil, subrole: "AXFullScreenButton"),
+               "the close and minimize buttons, and anything that is not a button, never open the menu")
     }
 
     // MARK: Restore on drag

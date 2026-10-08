@@ -138,8 +138,8 @@ final class WindowGreenButtonService {
               let button = raw
         else { return }
         AXUIElementSetMessagingTimeout(button, 0.25)
-        guard Self.string(button, kAXRoleAttribute) == (kAXButtonRole as String),
-              Self.string(button, kAXSubroleAttribute) == (kAXZoomButtonSubrole as String),
+        guard WindowGreenButtonIdentity.isGreenButton(role: Self.string(button, kAXRoleAttribute),
+                                                      subrole: Self.string(button, kAXSubroleAttribute)),
               let window = Self.element(button, kAXWindowAttribute)
         else { return }
         var pid = pid_t(0)
