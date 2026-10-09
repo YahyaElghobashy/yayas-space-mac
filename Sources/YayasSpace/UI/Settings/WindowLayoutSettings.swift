@@ -148,6 +148,8 @@ struct WindowLayoutGeneralTab: View {
         WindowGreenButtonMenuLayout.defaultDelayMilliseconds
     @AppStorage(DefaultsKey.windowLayoutGreenButtonLayout) private var greenButtonLayoutRaw =
         WindowGreenButtonMenuLayout.list.rawValue
+    @AppStorage(DefaultsKey.windowLayoutGreenButtonSystemMenuKey) private var systemMenuKeyRaw =
+        WindowSystemZoomMenuKey.control.rawValue
     @AppStorage(DefaultsKey.windowLayoutWindowGap) private var windowGap = 0
     @AppStorage(DefaultsKey.windowLayoutScreenGap) private var screenGap = 0
     @AppStorage(DefaultsKey.windowLayoutFitTightly) private var fitTightly = false
@@ -428,6 +430,11 @@ struct WindowLayoutGeneralTab: View {
                 Text(text.layoutGrid).tag(WindowGreenButtonMenuLayout.grid.rawValue)
             }
             .pickerStyle(.menu)
+            Picker(text.greenButtonSystemMenuKey, selection: $systemMenuKeyRaw) {
+                Text(text.systemMenuKeyControl).tag(WindowSystemZoomMenuKey.control.rawValue)
+                Text(text.systemMenuKeyCommand).tag(WindowSystemZoomMenuKey.command.rawValue)
+            }
+            .pickerStyle(.menu)
             Text(text.greenButtonSystemNote)
                 .font(.caption)
                 .foregroundStyle(.secondary)
@@ -564,6 +571,7 @@ enum WindowLayoutSettingsActions {
         DefaultsKey.windowLayoutGreenButtonMenuEnabled,
         DefaultsKey.windowLayoutGreenButtonDelay,
         DefaultsKey.windowLayoutGreenButtonLayout,
+        DefaultsKey.windowLayoutGreenButtonSystemMenuKey,
         DefaultsKey.windowLayoutWindowGap,
         DefaultsKey.windowLayoutScreenGap,
         DefaultsKey.windowLayoutFitTightly,

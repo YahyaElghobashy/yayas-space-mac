@@ -72,6 +72,9 @@ struct WindowCommandStrings {
     let greenButtonLayout: String
     let layoutList: String
     let layoutGrid: String
+    let greenButtonSystemMenuKey: String
+    let systemMenuKeyControl: String
+    let systemMenuKeyCommand: String
     let greenButtonSystemNote: String
 
     // Margins
@@ -228,7 +231,10 @@ struct WindowCommandStrings {
         greenButtonLayout: "Menu layout",
         layoutList: "Full list",
         layoutGrid: "Compact grid",
-        greenButtonSystemNote: "macOS opens its own menu under the green button after a moment. This menu opens beside it, so the two never cover each other.",
+        greenButtonSystemMenuKey: "Show the macOS menu while holding",
+        systemMenuKeyControl: "Control (⌃)",
+        systemMenuKeyCommand: "Command (⌘)",
+        greenButtonSystemNote: "While this menu is on, the macOS menu under the green button waits for that key, so the two never open together. It comes back as before when this menu is off or Yaya's Space quits.",
         marginsSection: "Margins",
         margins: "Space around windows",
         fitTightly: "No space at screen edges",

@@ -454,50 +454,81 @@ enum WindowCommandMenuLayout {
     }
 }
 
-/// Where the green-button menu opens.
+/// Where the green-button menu opens: it hangs from the button the way the
+/// system's own menu does, its arrow on the button. While this menu runs,
+/// the system's own one waits for a held key (`WindowSystemZoomMenuKey`), so
+/// the spot under the button is this menu's alone.
 enum WindowGreenButtonMenuPlacement {
-    /// The room the system's own green-button menu takes under the button,
-    /// generously measured, so ours never covers it.
-    static let systemMenuFootprint = CGSize(width: 272, height: 340)
-    static let gap: CGFloat = 8
+    /// The arrow that points at the button: base by height.
+    static let arrowSize = CGSize(width: 20, height: 9)
+    /// How far left of the button's middle the menu starts, as the system's
+    /// own menu does, so the arrow sits near its top-left corner.
+    static let arrowInset: CGFloat = 26
+    /// The arrow keeps this much menu on either side of its middle, so it
+    /// never runs into a rounded corner.
+    static let arrowMargin: CGFloat = 20
+    /// Room kept between the menu and the screen's edges.
+    static let screenMargin: CGFloat = 4
+    /// Between the button's edge and the arrow's tip.
+    static let gap: CGFloat = 1
+    /// A menu squeezed between the button and a screen edge still shows
+    /// this much before it scrolls.
+    static let minimumBodyHeight: CGFloat = 80
 
-    /// The menu's frame in AppKit coordinates. Without the system's menu it
-    /// drops down from the button. With it, the menu opens beside the
-    /// system's footprint (to its right, or left of the window when there is
-    /// no room), and only as a last resort anywhere that fits.
-    static func frame(buttonFrame button: CGRect,
-                      menuSize: CGSize,
-                      visibleFrame screen: CGRect,
-                      reservesSystemMenu: Bool) -> CGRect {
-        func clamped(_ rect: CGRect) -> CGRect {
-            var result = rect
-            result.origin.x = min(max(result.minX, screen.minX), max(screen.minX, screen.maxX - result.width))
-            result.origin.y = min(max(result.minY, screen.minY), max(screen.minY, screen.maxY - result.height))
-            return result
+    enum Edge: Equatable {
+        /// Under the button, the arrow on the menu's top edge.
+        case below
+        /// Over the button, the arrow on the menu's bottom edge, when there
+        /// is more room above than below for a menu that does not fit below.
+        case above
+    }
+
+    struct Layout: Equatable {
+        /// The panel, arrow included, in AppKit coordinates.
+        var frame: CGRect
+        /// The menu's body inside the panel (origin bottom-left).
+        var body: CGRect
+        /// Where the arrow's tip sits along the panel's width.
+        var arrowX: CGFloat
+        var edge: Edge
+        /// The body is shorter than the commands, which then scroll.
+        var scrolls: Bool
+    }
+
+    /// The menu under the button when it fits there, over it when only that
+    /// fits, else on the roomier side, scrolling. Kept on screen; the arrow
+    /// follows the button as far as the menu's corners allow.
+    static func layout(buttonFrame button: CGRect,
+                       contentSize: CGSize,
+                       visibleFrame screen: CGRect) -> Layout {
+        let room = screen.insetBy(dx: screenMargin, dy: screenMargin)
+        let reach = gap + arrowSize.height
+        let roomBelow = button.minY - reach - room.minY
+        let roomAbove = room.maxY - (button.maxY + reach)
+        let edge: Edge = contentSize.height <= roomBelow || roomBelow >= roomAbove ? .below : .above
+        let bodyHeight = max(min(contentSize.height, edge == .below ? roomBelow : roomAbove),
+                             min(contentSize.height, minimumBodyHeight)).rounded(.down)
+        let width = min(contentSize.width, room.width).rounded(.down)
+        let x = min(max((button.midX - arrowInset).rounded(), room.minX), max(room.minX, room.maxX - width))
+        let arrowX = min(max(button.midX - x, arrowMargin), width - arrowMargin)
+        let height = bodyHeight + arrowSize.height
+        let frame: CGRect
+        let body: CGRect
+        switch edge {
+        case .below:
+            frame = CGRect(x: x, y: (button.minY - gap - height).rounded(), width: width, height: height)
+            body = CGRect(x: 0, y: 0, width: width, height: bodyHeight)
+        case .above:
+            frame = CGRect(x: x, y: (button.maxY + gap).rounded(), width: width, height: height)
+            body = CGRect(x: 0, y: arrowSize.height, width: width, height: bodyHeight)
         }
-        let dropDown = CGRect(x: button.minX - 6, y: button.minY - gap - menuSize.height,
-                              width: menuSize.width, height: menuSize.height)
-        guard reservesSystemMenu else { return clamped(dropDown) }
-
-        let reserved = CGRect(x: button.minX - 12, y: button.minY - systemMenuFootprint.height,
-                              width: systemMenuFootprint.width, height: systemMenuFootprint.height)
-        let beside = CGRect(x: reserved.maxX + gap, y: button.minY - 4 - menuSize.height,
-                            width: menuSize.width, height: menuSize.height)
-        if beside.maxX <= screen.maxX { return clamped(beside) }
-        let leftOfWindow = CGRect(x: reserved.minX - gap - menuSize.width, y: button.maxY - menuSize.height,
-                                  width: menuSize.width, height: menuSize.height)
-        if leftOfWindow.minX >= screen.minX { return clamped(leftOfWindow) }
-        let above = CGRect(x: button.minX - 6, y: button.maxY + gap,
-                           width: menuSize.width, height: menuSize.height)
-        if above.maxY <= screen.maxY { return clamped(above) }
-        return clamped(beside)
+        return Layout(frame: frame, body: body, arrowX: arrowX, edge: edge,
+                      scrolls: bodyHeight < contentSize.height)
     }
 
     /// The way from the button to the menu, which counts as inside for the
     /// leave timer: the button, the part of the menu nearest to it and the
-    /// band between them. The pointer crosses it, sometimes over the
-    /// system's own menu, on its way to ours; the rest of the system's
-    /// menu stays outside, so resting there still closes ours.
+    /// band between them, which the pointer crosses on its way down.
     static func corridor(buttonFrame button: CGRect, menuFrame menu: CGRect, reach: CGFloat = 24) -> CGRect {
         let center = CGPoint(x: button.midX, y: button.midY)
         let nearest = CGPoint(x: min(max(center.x, menu.minX), menu.maxX),
@@ -755,6 +786,67 @@ enum WindowGreenButtonMenuLayout: String, CaseIterable, Identifiable {
     /// Hit-testing never runs faster than this, however short the delay:
     /// the pointer has to rest this long before anything is asked.
     static let minimumRest: TimeInterval = 1.0 / 30.0
+}
+
+/// Which key, held while the pointer rests on the green button, shows the
+/// system's own green-button menu instead of this one. While the
+/// green-button menu runs, macOS keeps its own menu for that key, so the two
+/// never open together.
+enum WindowSystemZoomMenuKey: String, CaseIterable, Identifiable {
+    case control
+    case command
+
+    var id: String { rawValue }
+
+    static func sanitized(_ rawValue: String?) -> WindowSystemZoomMenuKey {
+        rawValue.flatMap(WindowSystemZoomMenuKey.init(rawValue:)) ?? .control
+    }
+
+    /// The value of AppKit's own `NSZoomButtonMenuOption` preference that
+    /// shows the system's menu only while this key is held. AppKit reads it
+    /// on every hover: 0 shows the menu as usual, 1 never, 2 only with
+    /// Command, 3 only with Control.
+    var systemMenuOption: Int {
+        switch self {
+        case .control: return 3
+        case .command: return 2
+        }
+    }
+}
+
+/// Taking AppKit's global `NSZoomButtonMenuOption` preference over while the
+/// green-button menu runs, and handing it back as it was found.
+enum WindowSystemZoomMenuPreference {
+    /// The global preference every app's green button reads.
+    static let key = "NSZoomButtonMenuOption"
+    /// Remembered in place of a preference that was not set at all.
+    static let unset = -1
+
+    struct State: Equatable {
+        /// The global preference; nil when it is not set.
+        var system: Int?
+        /// The value found before the menu took the preference over (`unset`
+        /// when there was none); nil while the menu does not hold it.
+        var saved: Int?
+        /// What the menu wrote, to tell it from a later change by anyone else.
+        var written: Int?
+    }
+
+    /// Writes the option for the chosen key. The value found the first time
+    /// is kept through later writes: a change of key, or a start after the
+    /// app stopped without handing the preference back.
+    static func takingOver(_ state: State, option: Int) -> State {
+        State(system: option, saved: state.saved ?? state.system ?? unset, written: option)
+    }
+
+    /// Puts back the value found, unless something else changed the
+    /// preference since; that change then stands. A preference the menu
+    /// never took over is left alone.
+    static func handingBack(_ state: State) -> State {
+        guard let saved = state.saved else { return state }
+        let system = state.system == state.written ? (saved == unset ? nil : saved) : state.system
+        return State(system: system, saved: nil, written: nil)
+    }
 }
 
 /// What the green-button menu accepts as the green button under the pointer,

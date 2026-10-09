@@ -679,43 +679,83 @@ enum WindowCommandTests {
         expect(WindowCommandMenuLayout.entries(of: set) { _ in false }.isEmpty,
                "a menu with no visible command is empty, not a pile of separators")
 
+        // The menu hangs from the green button, its arrow on the button, the
+        // way the system's own menu does; that menu waits for a held key.
+        typealias Placement = WindowGreenButtonMenuPlacement
         let screen = CGRect(x: 0, y: 0, width: 1440, height: 875)
         let button = CGRect(x: 208, y: 830, width: 14, height: 16)
         let size = CGSize(width: 240, height: 300)
-        let plain = WindowGreenButtonMenuPlacement.frame(buttonFrame: button, menuSize: size,
-                                                         visibleFrame: screen, reservesSystemMenu: false)
-        expect(plain.maxY <= button.minY && abs(plain.minX - (button.minX - 6)) < 0.5,
-               "without the system menu the green-button menu drops down from the button")
-        let beside = WindowGreenButtonMenuPlacement.frame(buttonFrame: button, menuSize: size,
-                                                          visibleFrame: screen, reservesSystemMenu: true)
-        let footprint = CGRect(x: button.minX - 12,
-                               y: button.minY - WindowGreenButtonMenuPlacement.systemMenuFootprint.height,
-                               width: WindowGreenButtonMenuPlacement.systemMenuFootprint.width,
-                               height: WindowGreenButtonMenuPlacement.systemMenuFootprint.height)
-        expect(!beside.intersects(footprint) && screen.contains(beside),
-               "the menu opens beside the system's own green-button menu, never over it")
-        let nearRight = CGRect(x: 1300, y: 830, width: 14, height: 16)
-        let flipped = WindowGreenButtonMenuPlacement.frame(buttonFrame: nearRight, menuSize: size,
-                                                           visibleFrame: screen, reservesSystemMenu: true)
-        let flippedFootprint = footprint.offsetBy(dx: nearRight.minX - button.minX, dy: 0)
-        expect(!flipped.intersects(flippedFootprint) && flipped.maxX <= nearRight.minX,
-               "without room on the right it opens to the left of the window")
-
-        // The corridor from the button to the menu counts as inside.
-        let corridor = WindowGreenButtonMenuPlacement.corridor(buttonFrame: button, menuFrame: beside)
-        let start = CGPoint(x: button.midX, y: button.midY)
-        let landing = CGPoint(x: beside.minX + 4, y: beside.maxY - 4)
-        let onTheWay = (1...9).map { step -> CGPoint in
-            let t = CGFloat(step) / 10
-            return CGPoint(x: start.x + (landing.x - start.x) * t, y: start.y + (landing.y - start.y) * t)
+        func tip(_ layout: Placement.Layout) -> CGPoint {
+            CGPoint(x: layout.frame.minX + layout.arrowX,
+                    y: layout.edge == .below ? layout.frame.maxY : layout.frame.minY)
         }
-        expect(onTheWay.allSatisfy(corridor.contains),
-               "the way from the green button to the menu beside the system's menu keeps it open")
-        expect(!corridor.contains(CGPoint(x: button.minX + 100, y: button.minY - 200)),
-               "resting deep inside the system's own menu still lets the menu close")
-        let below = WindowGreenButtonMenuPlacement.corridor(buttonFrame: button, menuFrame: plain)
-        expect(below.contains(CGPoint(x: button.midX, y: button.minY - 4)),
-               "a menu dropping down from the button keeps the gap between them inside")
+        let hanging = Placement.layout(buttonFrame: button, contentSize: size, visibleFrame: screen)
+        expect(hanging.edge == .below && !hanging.scrolls
+                && abs(tip(hanging).x - button.midX) < 0.5
+                && abs(tip(hanging).y - (button.minY - Placement.gap)) < 0.5,
+               "the green-button menu hangs from the button, its arrow's tip just under the button")
+        expect(hanging.frame.minX == button.midX - Placement.arrowInset
+                && hanging.body == CGRect(x: 0, y: 0, width: 240, height: 300)
+                && hanging.frame.height == 300 + Placement.arrowSize.height,
+               "it starts just left of the button, as the system's own menu does, its body under the arrow")
+
+        let nearRight = CGRect(x: 1380, y: 830, width: 14, height: 16)
+        let atRight = Placement.layout(buttonFrame: nearRight, contentSize: size, visibleFrame: screen)
+        expect(atRight.frame.maxX == screen.maxX - Placement.screenMargin
+                && abs(tip(atRight).x - nearRight.midX) < 0.5,
+               "near the screen's right edge the menu stays on screen and its arrow still finds the button")
+        let atCorner = Placement.layout(buttonFrame: CGRect(x: 1426, y: 830, width: 14, height: 16),
+                                        contentSize: size, visibleFrame: screen)
+        expect(atCorner.arrowX == atCorner.frame.width - Placement.arrowMargin,
+               "the arrow stops short of the rounded corner when the button sits right at the edge")
+
+        let low = CGRect(x: 208, y: 200, width: 14, height: 16)
+        let flipped = Placement.layout(buttonFrame: low, contentSize: size, visibleFrame: screen)
+        expect(flipped.edge == .above && !flipped.scrolls
+                && abs(tip(flipped).y - (low.maxY + Placement.gap)) < 0.5
+                && flipped.body.minY == Placement.arrowSize.height,
+               "with no room below, the menu opens above the button, its arrow pointing down at it")
+        let tall = Placement.layout(buttonFrame: button, contentSize: CGSize(width: 240, height: 2_000),
+                                    visibleFrame: screen)
+        expect(tall.scrolls && tall.edge == .below
+                && screen.insetBy(dx: Placement.screenMargin, dy: Placement.screenMargin).contains(tall.frame),
+               "a menu taller than the room scrolls, on screen, on the roomier side")
+
+        // The way from the button down to the menu counts as inside.
+        let corridor = Placement.corridor(buttonFrame: button, menuFrame: hanging.frame)
+        expect(corridor.contains(CGPoint(x: button.midX, y: button.minY - 4))
+                && corridor.contains(CGPoint(x: hanging.frame.minX + hanging.arrowX, y: hanging.frame.maxY - 6)),
+               "crossing from the button onto the menu's arrow keeps it open")
+        expect(!corridor.contains(CGPoint(x: button.minX + 200, y: button.minY - 280)),
+               "resting far from both still lets the menu close")
+
+        // macOS keeps its own green-button menu for a held key while this
+        // one runs, through the value its NSZoomButtonMenuOption preference
+        // has for that key, and gets back whatever it had before.
+        expect(WindowSystemZoomMenuKey.control.systemMenuOption == 3
+                && WindowSystemZoomMenuKey.command.systemMenuOption == 2,
+               "Control and Command map to the values AppKit reads for its own menu")
+        expect(WindowSystemZoomMenuKey.sanitized(nil) == .control
+                && WindowSystemZoomMenuKey.sanitized("shift") == .control
+                && WindowSystemZoomMenuKey.sanitized("command") == .command,
+               "the key defaults to Control and survives an unknown stored value")
+        typealias Preference = WindowSystemZoomMenuPreference
+        let fresh = Preference.takingOver(.init(system: nil, saved: nil, written: nil), option: 3)
+        expect(fresh == .init(system: 3, saved: Preference.unset, written: 3)
+                && Preference.handingBack(fresh) == .init(system: nil, saved: nil, written: nil),
+               "with nothing set before, the menu sets the preference and removes it again when it stops")
+        let ownValue = Preference.takingOver(.init(system: 1, saved: nil, written: nil), option: 3)
+        let otherKey = Preference.takingOver(ownValue, option: 2)
+        expect(otherKey == .init(system: 2, saved: 1, written: 2)
+                && Preference.handingBack(otherKey) == .init(system: 1, saved: nil, written: nil),
+               "a value of the user's own survives a change of key and comes back when the menu stops")
+        expect(Preference.takingOver(.init(system: 3, saved: 1, written: 3), option: 3).saved == 1,
+               "a start after a stop that never handed back keeps the value found first")
+        expect(Preference.handingBack(.init(system: 0, saved: 1, written: 3)) == .init(system: 0, saved: nil, written: nil),
+               "a change someone else made in the meantime stands when the menu stops")
+        let untouched = Preference.State(system: 2, saved: nil, written: nil)
+        expect(Preference.handingBack(untouched) == untouched,
+               "a preference the menu never took over is left alone")
 
         // A window that can go full screen, most of them, reports its green
         // button as the full-screen button; one that can only zoom, as the
@@ -1131,6 +1171,13 @@ enum WindowCommandTests {
                 && controllerSource.contains("nameFieldStringValue = WindowLayoutSyncSupport.fileName"),
                "the sync folder and Export both use the fixed file name, never a translated one")
 
+        expect(Sync.syncedKeys.contains { $0.key == DefaultsKey.windowLayoutGreenButtonSystemMenuKey && $0.type == .string },
+               "the key that shows the system's own green-button menu travels with the other settings")
+        expect(!Sync.syncedKeys.contains { [DefaultsKey.windowLayoutSystemZoomMenuSaved,
+                                            DefaultsKey.windowLayoutSystemZoomMenuWritten].contains($0.key) }
+                && Defaults.registeredDefaults[DefaultsKey.windowLayoutSystemZoomMenuSaved] == nil
+                && Defaults.registeredDefaults[DefaultsKey.windowLayoutSystemZoomMenuWritten] == nil,
+               "what this Mac's system menu preference was before stays on this Mac, unregistered")
         let observed = Set(Sync.observedKeys)
         expect(observed.isSuperset(of: Sync.syncedKeys.map(\.key))
                 && observed.contains(DefaultsKey.windowLayoutCommands)

@@ -39,6 +39,7 @@ enum WindowLayoutSyncSupport {
         (DefaultsKey.windowLayoutGreenButtonMenuEnabled, .bool),
         (DefaultsKey.windowLayoutGreenButtonDelay, .integer),
         (DefaultsKey.windowLayoutGreenButtonLayout, .string),
+        (DefaultsKey.windowLayoutGreenButtonSystemMenuKey, .string),
         (DefaultsKey.windowLayoutWindowGap, .integer),
         (DefaultsKey.windowLayoutScreenGap, .integer),
         (DefaultsKey.windowLayoutFitTightly, .bool),

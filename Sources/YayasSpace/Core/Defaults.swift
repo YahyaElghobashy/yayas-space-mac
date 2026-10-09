@@ -659,6 +659,12 @@ enum DefaultsKey {
     static let windowLayoutGreenButtonMenuEnabled = "windowLayoutGreenButtonMenuEnabled"
     static let windowLayoutGreenButtonDelay = "windowLayoutGreenButtonDelay" // milliseconds
     static let windowLayoutGreenButtonLayout = "windowLayoutGreenButtonLayout" // WindowGreenButtonMenuLayout raw value
+    static let windowLayoutGreenButtonSystemMenuKey = "windowLayoutGreenButtonSystemMenuKey" // WindowSystemZoomMenuKey raw value
+    // Machine state, never registered or exported: the system's own
+    // green-button menu preference as found before the menu took it over,
+    // and the value the menu wrote, so quitting hands it back.
+    static let windowLayoutSystemZoomMenuSaved = "windowLayoutSystemZoomMenuSaved"
+    static let windowLayoutSystemZoomMenuWritten = "windowLayoutSystemZoomMenuWritten"
     static let windowLayoutFitTightly = "windowLayoutFitTightly" // no screen margin, window margin kept
     static let windowLayoutIgnoredApps = "windowLayoutIgnoredApps" // [bundle id]
     // Machine state, never exported: where this Mac syncs and when it last did.
@@ -1421,6 +1427,7 @@ enum Defaults {
         DefaultsKey.windowLayoutGreenButtonMenuEnabled: false,
         DefaultsKey.windowLayoutGreenButtonDelay: WindowGreenButtonMenuLayout.defaultDelayMilliseconds,
         DefaultsKey.windowLayoutGreenButtonLayout: WindowGreenButtonMenuLayout.list.rawValue,
+        DefaultsKey.windowLayoutGreenButtonSystemMenuKey: WindowSystemZoomMenuKey.control.rawValue,
         DefaultsKey.windowLayoutFitTightly: false,
         DefaultsKey.windowLayoutIgnoredApps: [String](),
         DefaultsKey.windowLayoutSyncFolder: "",

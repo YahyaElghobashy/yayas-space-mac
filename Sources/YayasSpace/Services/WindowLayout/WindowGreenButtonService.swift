@@ -5,7 +5,9 @@ import AppKit
 import ApplicationServices
 
 /// Opens a menu of commands when the pointer rests on a window's green
-/// (zoom) button. Cheap by construction: the global monitor only records
+/// (zoom) button. While it runs, the system's own green-button menu waits
+/// for a held key, and resting with that key held leaves the button to it.
+/// Cheap by construction: the global monitor only records
 /// that the pointer moved; one timer waits until it has been still for the
 /// hover delay, then asks the window server, never faster than ~30 Hz,
 /// which ordinary window is in front under the pointer. Only a pointer
@@ -22,10 +24,12 @@ final class WindowGreenButtonService {
     private var lastHitTestAt: TimeInterval = 0
     private var lastTestedPoint: CGPoint?
     private var menu: WindowGreenButtonMenuController?
-    /// The hover delay, read once and again only when its preference
-    /// changes, never on a pointer move.
+    /// The hover delay and the key that asks for the system's menu, read
+    /// once and again only when their preferences change, never on a
+    /// pointer move.
     private var hoverDelay = WindowGreenButtonService.storedHoverDelay()
-    private var delayObserver: WindowLayoutDefaultsObserver?
+    private var systemMenuKey = WindowGreenButtonService.storedSystemMenuKey()
+    private var preferenceObserver: WindowLayoutDefaultsObserver?
 
     private init() {}
 
@@ -38,8 +42,12 @@ final class WindowGreenButtonService {
     private func start() {
         guard moveMonitor == nil else { return }
         hoverDelay = Self.storedHoverDelay()
-        delayObserver = WindowLayoutDefaultsObserver(keys: [DefaultsKey.windowLayoutGreenButtonDelay]) { [weak self] in
-            DispatchQueue.main.async { self?.hoverDelay = Self.storedHoverDelay() }
+        systemMenuKey = Self.storedSystemMenuKey()
+        WindowSystemZoomMenu.takeOver(for: systemMenuKey)
+        preferenceObserver = WindowLayoutDefaultsObserver(
+            keys: [DefaultsKey.windowLayoutGreenButtonDelay, DefaultsKey.windowLayoutGreenButtonSystemMenuKey]
+        ) { [weak self] in
+            DispatchQueue.main.async { self?.preferencesChanged() }
         }
         moveMonitor = NSEvent.addGlobalMonitorForEvents(matching: [.mouseMoved]) { [weak self] _ in
             self?.pointerMoved()
@@ -56,11 +64,28 @@ final class WindowGreenButtonService {
         if let clickMonitor { NSEvent.removeMonitor(clickMonitor) }
         moveMonitor = nil
         clickMonitor = nil
-        delayObserver = nil
+        preferenceObserver = nil
         restTimer?.invalidate()
         restTimer = nil
         lastTestedPoint = nil
         closeMenu()
+        // The system's own menu comes back as it was whenever this one stops:
+        // switched off, Accessibility revoked or the app quitting.
+        WindowSystemZoomMenu.handBack()
+    }
+
+    private func preferencesChanged() {
+        guard moveMonitor != nil else { return }
+        hoverDelay = Self.storedHoverDelay()
+        let key = Self.storedSystemMenuKey()
+        guard key != systemMenuKey else { return }
+        systemMenuKey = key
+        WindowSystemZoomMenu.takeOver(for: key)
+    }
+
+    private static func storedSystemMenuKey() -> WindowSystemZoomMenuKey {
+        WindowSystemZoomMenuKey.sanitized(
+            UserDefaults.standard.string(forKey: DefaultsKey.windowLayoutGreenButtonSystemMenuKey))
     }
 
     private static func storedHoverDelay() -> TimeInterval {
@@ -108,6 +133,8 @@ final class WindowGreenButtonService {
             scheduleRestCheck(after: delay - rested)
             return
         }
+        // Resting with the key held asks for the system's own menu instead.
+        if NSEvent.modifierFlags.contains(systemMenuKey.modifierFlag) { return }
         let point = NSEvent.mouseLocation
         if let last = lastTestedPoint, hypot(last.x - point.x, last.y - point.y) < 1 { return }
         let sinceLast = now - lastHitTestAt
@@ -267,15 +294,150 @@ final class WindowGreenButtonService {
     }
 }
 
+/// AppKit's own green-button menu, kept for a held key while the
+/// green-button menu runs, through the global preference AppKit reads on
+/// every hover (`WindowSystemZoomMenuPreference` holds the rules). What it
+/// found is remembered in this app's preferences before anything is
+/// written, so even a crash leaves the next start able to hand it back.
+enum WindowSystemZoomMenu {
+    private typealias Preference = WindowSystemZoomMenuPreference
+
+    static func takeOver(for key: WindowSystemZoomMenuKey) {
+        let next = Preference.takingOver(current, option: key.systemMenuOption)
+        remember(next)
+        writeSystem(next.system)
+    }
+
+    static func handBack() {
+        let state = current
+        guard state.saved != nil else { return }
+        let next = Preference.handingBack(state)
+        writeSystem(next.system)
+        remember(next)
+    }
+
+    private static var current: Preference.State {
+        let defaults = UserDefaults.standard
+        let system = CFPreferencesCopyValue(Preference.key as CFString, kCFPreferencesAnyApplication,
+                                            kCFPreferencesCurrentUser, kCFPreferencesAnyHost) as? Int
+        return Preference.State(system: system,
+                                saved: defaults.object(forKey: DefaultsKey.windowLayoutSystemZoomMenuSaved) as? Int,
+                                written: defaults.object(forKey: DefaultsKey.windowLayoutSystemZoomMenuWritten) as? Int)
+    }
+
+    private static func remember(_ state: Preference.State) {
+        let defaults = UserDefaults.standard
+        for (key, value) in [(DefaultsKey.windowLayoutSystemZoomMenuSaved, state.saved),
+                             (DefaultsKey.windowLayoutSystemZoomMenuWritten, state.written)] {
+            if let value { defaults.set(value, forKey: key) } else { defaults.removeObject(forKey: key) }
+        }
+    }
+
+    private static func writeSystem(_ value: Int?) {
+        CFPreferencesSetValue(Preference.key as CFString, value.map { NSNumber(value: $0) },
+                              kCFPreferencesAnyApplication, kCFPreferencesCurrentUser, kCFPreferencesAnyHost)
+        CFPreferencesSynchronize(kCFPreferencesAnyApplication, kCFPreferencesCurrentUser, kCFPreferencesAnyHost)
+    }
+}
+
+private extension WindowSystemZoomMenuKey {
+    var modifierFlag: NSEvent.ModifierFlags {
+        switch self {
+        case .control: return .control
+        case .command: return .command
+        }
+    }
+}
+
+/// The menu's outline: a rounded body with an arrow on the edge that faces
+/// the button, its tip slightly rounded.
+enum WindowGreenButtonMenuShape {
+    static let cornerRadius: CGFloat = 10
+
+    static func outline(body: CGRect, arrowX: CGFloat,
+                        edge: WindowGreenButtonMenuPlacement.Edge) -> NSBezierPath {
+        let r = cornerRadius
+        let arrow = WindowGreenButtonMenuPlacement.arrowSize
+        let half = arrow.width / 2
+        let path = NSBezierPath()
+        // Counter-clockwise from the bottom edge's left end.
+        path.move(to: CGPoint(x: body.minX + r, y: body.minY))
+        if edge == .above {
+            path.line(to: CGPoint(x: arrowX - half, y: body.minY))
+            path.appendArc(from: CGPoint(x: arrowX, y: body.minY - arrow.height),
+                           to: CGPoint(x: arrowX + half, y: body.minY), radius: 2)
+            path.line(to: CGPoint(x: arrowX + half, y: body.minY))
+        }
+        path.line(to: CGPoint(x: body.maxX - r, y: body.minY))
+        path.appendArc(withCenter: CGPoint(x: body.maxX - r, y: body.minY + r), radius: r,
+                       startAngle: 270, endAngle: 360)
+        path.line(to: CGPoint(x: body.maxX, y: body.maxY - r))
+        path.appendArc(withCenter: CGPoint(x: body.maxX - r, y: body.maxY - r), radius: r,
+                       startAngle: 0, endAngle: 90)
+        if edge == .below {
+            path.line(to: CGPoint(x: arrowX + half, y: body.maxY))
+            path.appendArc(from: CGPoint(x: arrowX, y: body.maxY + arrow.height),
+                           to: CGPoint(x: arrowX - half, y: body.maxY), radius: 2)
+            path.line(to: CGPoint(x: arrowX - half, y: body.maxY))
+        }
+        path.line(to: CGPoint(x: body.minX + r, y: body.maxY))
+        path.appendArc(withCenter: CGPoint(x: body.minX + r, y: body.maxY - r), radius: r,
+                       startAngle: 90, endAngle: 180)
+        path.line(to: CGPoint(x: body.minX, y: body.minY + r))
+        path.appendArc(withCenter: CGPoint(x: body.minX + r, y: body.minY + r), radius: r,
+                       startAngle: 180, endAngle: 270)
+        path.close()
+        return path
+    }
+
+    /// The material's mask: opaque inside the outline only.
+    static func mask(size: CGSize, outline: NSBezierPath) -> NSImage {
+        NSImage(size: size, flipped: false) { _ in
+            NSColor.black.setFill()
+            outline.fill()
+            return true
+        }
+    }
+}
+
+/// The hairline around the menu and its arrow. It never takes the pointer.
+private final class WindowGreenButtonMenuBorder: NSView {
+    private let outline: NSBezierPath
+
+    init(frame: CGRect, outline: NSBezierPath) {
+        self.outline = outline
+        super.init(frame: frame)
+    }
+
+    required init?(coder: NSCoder) { nil }
+
+    override var isOpaque: Bool { false }
+
+    override func hitTest(_ point: NSPoint) -> NSView? { nil }
+
+    override func draw(_ dirtyRect: NSRect) {
+        let dark = effectiveAppearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
+        (dark ? NSColor.white.withAlphaComponent(0.16) : NSColor.black.withAlphaComponent(0.12)).setStroke()
+        let line = outline.copy() as! NSBezierPath
+        line.lineWidth = 1
+        // Inside the mask, so the material's own edge never shows past it.
+        NSGraphicsContext.saveGraphicsState()
+        outline.addClip()
+        line.stroke()
+        NSGraphicsContext.restoreGraphicsState()
+    }
+}
+
 struct WindowGreenButtonMenuItem {
     let command: WindowCommand
     let title: String
     let isEnabled: Bool
 }
 
-/// The open menu: a non-activating panel beside the green button. It closes
-/// on a choice, on a click elsewhere, on Escape, or shortly after the
-/// pointer leaves the panel, the button and the corridor between them.
+/// The open menu: a non-activating panel hanging from the green button, its
+/// arrow on the button. It closes on a choice, on a click elsewhere, on
+/// Escape, or shortly after the pointer leaves the panel, the button and the
+/// corridor between them.
 ///
 /// The keyboard always stays with the app in front: the panel never becomes
 /// the key window, not when it opens and not under the pointer, so typing
@@ -306,11 +468,10 @@ final class WindowGreenButtonMenuController {
         let content = WindowGreenButtonMenuView(items: items, layout: layout, grid: grid)
         self.content = content
         let size = content.preferredSize
-        let frame = WindowGreenButtonMenuPlacement.frame(buttonFrame: buttonFrame,
-                                                         menuSize: size,
-                                                         visibleFrame: visibleFrame,
-                                                         reservesSystemMenu: true)
-        panel = WindowGreenButtonMenuPanel(contentRect: frame,
+        let placement = WindowGreenButtonMenuPlacement.layout(buttonFrame: buttonFrame,
+                                                              contentSize: size,
+                                                              visibleFrame: visibleFrame)
+        panel = WindowGreenButtonMenuPanel(contentRect: placement.frame,
                                            styleMask: [.borderless, .nonactivatingPanel],
                                            backing: .buffered,
                                            defer: false)
@@ -323,20 +484,33 @@ final class WindowGreenButtonMenuController {
         panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .transient, .ignoresCycle]
         panel.animationBehavior = .utilityWindow
 
-        let background = NSVisualEffectView(frame: CGRect(origin: .zero, size: size))
+        // One outline, the body and its arrow, shapes the material, the
+        // border and so the shadow.
+        let bounds = CGRect(origin: .zero, size: placement.frame.size)
+        let outline = WindowGreenButtonMenuShape.outline(body: placement.body,
+                                                         arrowX: placement.arrowX,
+                                                         edge: placement.edge)
+        let background = NSVisualEffectView(frame: bounds)
         background.material = .menu
         background.blendingMode = .behindWindow
         background.state = .active
-        background.wantsLayer = true
-        background.layer?.cornerRadius = 10
-        background.layer?.cornerCurve = .continuous
-        background.layer?.masksToBounds = true
-        background.layer?.borderWidth = 0.5
-        background.layer?.borderColor = NSColor.white.withAlphaComponent(0.16).cgColor
-        background.autoresizingMask = [.width, .height]
-        content.frame = background.bounds
-        content.autoresizingMask = [.width, .height]
-        background.addSubview(content)
+        background.maskImage = WindowGreenButtonMenuShape.mask(size: bounds.size, outline: outline)
+        if placement.scrolls {
+            // Too tall for the room beside the button: the commands scroll.
+            let scroll = NSScrollView(frame: placement.body)
+            scroll.drawsBackground = false
+            scroll.borderType = .noBorder
+            scroll.hasVerticalScroller = true
+            scroll.autohidesScrollers = true
+            scroll.scrollerStyle = .overlay
+            content.frame = CGRect(x: 0, y: 0, width: placement.body.width, height: size.height)
+            scroll.documentView = content
+            background.addSubview(scroll)
+        } else {
+            content.frame = placement.body
+            background.addSubview(content)
+        }
+        background.addSubview(WindowGreenButtonMenuBorder(frame: bounds, outline: outline))
         panel.contentView = background
 
         content.onChoose = { [weak self] command in self?.onChoose?(command) }
@@ -353,6 +527,9 @@ final class WindowGreenButtonMenuController {
     /// Space: the app in front keeps the keyboard.
     func show() {
         panel.orderFrontRegardless()
+        // The shadow follows the shaped content, arrow included.
+        panel.display()
+        panel.invalidateShadow()
         // Escape typed into the app in front closes the menu. The monitors
         // only watch, so the key still reaches that app.
         escapeMonitor = NSEvent.addGlobalMonitorForEvents(matching: [.keyDown]) { [weak self] event in
