@@ -50,6 +50,12 @@ struct WindowCommandStrings {
     let draggingSection: String
     let snapByDragging: String
     let snapByDraggingCaption: String
+    let snapSystemTilingCaption: String
+    let snapOptionTilingHint: String
+    let tilingPromptTitle: String
+    let tilingPromptMessage: String
+    let tilingPromptKeep: String
+    let tilingPromptSwitch: String
     let restoreOnDrag: String
     let restoreOnDragCaption: String
     let areasSection: String
@@ -212,6 +218,12 @@ struct WindowCommandStrings {
         draggingSection: "Dragging",
         snapByDragging: "Snap dragged windows into place",
         snapByDraggingCaption: "Drag a window by its title bar into a command’s drag area, watch the preview, then let go.",
+        snapSystemTilingCaption: "While this is on, macOS tiling by dropping a window on a screen edge or the menu bar is switched off. It comes back as it was when snapping is off or Yaya's Space quits.",
+        snapOptionTilingHint: "Hold Option while dragging to tile with macOS instead.",
+        tilingPromptTitle: "macOS tiling is on again",
+        tilingPromptMessage: "Dropping a window on a screen edge would now be tiled by macOS and snapped by Window Layout at once. Keep snapping with Window Layout, or switch to macOS tiling?",
+        tilingPromptKeep: "Keep Window Layout Snapping",
+        tilingPromptSwitch: "Switch to macOS Tiling",
         restoreOnDrag: "Give snapped windows back their size",
         restoreOnDragCaption: "A window placed by Window Layout returns to the size it had before, as soon as you drag it away.",
         areasSection: "Drag Areas",

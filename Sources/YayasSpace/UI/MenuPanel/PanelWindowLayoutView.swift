@@ -115,7 +115,7 @@ struct PanelWindowLayoutView: View {
                 .controlSize(.small)
                 .font(.system(size: 10.5, weight: .medium))
                 .onChange(of: edgeSnapEnabled) { _, _ in
-                    WindowLayoutService.shared.syncWithPreferences()
+                    refreshSystemTilingState()
                 }
             Text(commandText.snapByDraggingCaption)
                 .font(.system(size: 9.5))
@@ -208,8 +208,10 @@ struct PanelWindowLayoutView: View {
     }
 
     private func refreshSystemTilingState() {
-        systemTilingEnabled = WindowEdgeSnapSupport.isSystemTilingEnabled
+        // The sync may switch the system's tiling off for snapping, so the
+        // switches are read after it.
         WindowLayoutService.shared.syncWithPreferences()
+        systemTilingEnabled = WindowEdgeSnapSupport.isSystemTilingEnabled
     }
 
     @ViewBuilder

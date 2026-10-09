@@ -160,6 +160,7 @@ struct WindowLayoutGeneralTab: View {
     @State private var launchAtLogin = LaunchAtLogin.isEnabled
     @State private var loginError: String?
     @State private var systemTilingEnabled = WindowEdgeSnapSupport.isSystemTilingEnabled
+    @State private var optionTilingEnabled = WindowEdgeSnapSupport.isSystemOptionTilingEnabled
     @State private var confirmingReset = false
 
     private var text: WindowCommandStrings { .localized(l10n.language) }
@@ -336,10 +337,18 @@ struct WindowLayoutGeneralTab: View {
     private var draggingSection: some View {
         Section(text.draggingSection) {
             Toggle(text.snapByDragging, isOn: $snapEnabled)
-                .onChange(of: snapEnabled) { _, _ in service.syncWithPreferences() }
+                .onChange(of: snapEnabled) { _, _ in refreshSystemState() }
             Text(text.snapByDraggingCaption)
                 .font(.caption)
                 .foregroundStyle(.secondary)
+            if snapEnabled && !systemTilingEnabled {
+                Text(optionTilingEnabled
+                     ? text.snapSystemTilingCaption + " " + text.snapOptionTilingHint
+                     : text.snapSystemTilingCaption)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
             if systemTilingEnabled {
                 Label(layoutText.edgeSnapSystemConflict, systemImage: "exclamationmark.triangle.fill")
                     .font(.caption)
@@ -518,9 +527,12 @@ struct WindowLayoutGeneralTab: View {
     }
 
     private func refreshSystemState() {
-        systemTilingEnabled = WindowEdgeSnapSupport.isSystemTilingEnabled
+        // The sync below may switch the system's tiling off for snapping, so
+        // the switches are read after it.
         launchAtLogin = LaunchAtLogin.isEnabled
         service.syncWithPreferences()
+        systemTilingEnabled = WindowEdgeSnapSupport.isSystemTilingEnabled
+        optionTilingEnabled = WindowEdgeSnapSupport.isSystemOptionTilingEnabled
     }
 }
 

@@ -63,6 +63,9 @@ final class WindowLayoutService: ObservableObject {
     /// (leaving System Settings is one) and before a drop places a window;
     /// never on a click.
     private var systemTilingEnabled = WindowEdgeSnapSupport.isSystemTilingEnabled
+    /// Whether holding Option tiles with the system; such a drag is left to
+    /// it. Read with the switches above.
+    private var systemOptionTilingEnabled = WindowEdgeSnapSupport.isSystemOptionTilingEnabled
     private var appActivationObserver: NSObjectProtocol?
     private var commandStoreObservation: AnyCancellable?
     private var directionalHotKeyRef: EventHotKeyRef?
@@ -164,6 +167,14 @@ final class WindowLayoutService: ObservableObject {
         let defaults = UserDefaults.standard
         let snappingEnabled = defaults.bool(forKey: DefaultsKey.windowEdgeSnapEnabled)
         let hasLiveDragAreas = commands.hasEnabledActivation
+        // Snapping and the system's own drag tiling would both act on one
+        // drop. While snapping can run, the system's edge and menu-bar
+        // tiling are switched off, the way Magnet does it, and put back when
+        // it stops; the grant decides, not a locked screen.
+        WindowSystemTiling.sync(snappingWanted: available && AXIsProcessTrusted()
+                                    && snappingEnabled && hasLiveDragAreas)
+        systemTilingEnabled = WindowEdgeSnapSupport.isSystemTilingEnabled
+        systemOptionTilingEnabled = WindowEdgeSnapSupport.isSystemOptionTilingEnabled
         dragTracking = WindowDragTracking.resolve(
             featureAvailable: available,
             trusted: trusted,
@@ -217,6 +228,7 @@ final class WindowLayoutService: ObservableObject {
     /// Reads the system's tiling switches again; when they changed, what
     /// dragging does is worked out again.
     private func refreshSystemTiling() {
+        systemOptionTilingEnabled = WindowEdgeSnapSupport.isSystemOptionTilingEnabled
         let enabled = WindowEdgeSnapSupport.isSystemTilingEnabled
         guard enabled != systemTilingEnabled else { return }
         systemTilingEnabled = enabled
@@ -233,6 +245,8 @@ final class WindowLayoutService: ObservableObject {
         stopEdgeSnapTap()
         stopPassiveDragMonitor()
         watchSystemTiling(false)
+        // The system's own drag tiling comes back as it was found.
+        WindowSystemTiling.handBack()
         WindowLayoutCompanions.suspend()
         for timer in settleTimers.values { timer.invalidate() }
         settleTimers.removeAll()
@@ -1973,6 +1987,16 @@ final class WindowLayoutService: ObservableObject {
     /// follows the window.
     private func updateDragTarget(_ drag: inout WindowEdgeSnapDrag, at location: CGPoint) {
         guard let context = drag.context else { return }
+        // Holding Option asks the system to tile this drag, while its Option
+        // tiling is on: snapping steps aside until the key is let go.
+        if systemOptionTilingEnabled, NSEvent.modifierFlags.contains(.option) {
+            drag.lastMatch = nil
+            guard drag.target != nil else { return }
+            drag.target = nil
+            WindowLayoutOverlays.shared.highlight(commandID: nil)
+            hideEdgeSnapPreview(immediately: true)
+            return
+        }
         let found = dragMatch(atQuartzPoint: location, context: context)
         let followsWindow = found?.command.kind.previewFollowsWindow ?? false
         if found?.match == drag.lastMatch, !followsWindow { return }
@@ -2128,6 +2152,7 @@ final class WindowLayoutService: ObservableObject {
               let command = commands.command(id: target.commandID)?.command,
               command.effectiveActivation != nil,
               !systemTilingEnabled,
+              !(systemOptionTilingEnabled && NSEvent.modifierFlags.contains(.option)),
               AXIsProcessTrusted(),
               canSetFrame(on: drag.window),
               AXWindowResolver.windowID(for: drag.window) == drag.key.windowID,

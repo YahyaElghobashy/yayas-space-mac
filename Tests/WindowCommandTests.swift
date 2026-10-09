@@ -20,6 +20,7 @@ enum WindowCommandTests {
         namesAndEditors(expect)
         menusAndPlacement(expect)
         restoreOnDrag(expect)
+        systemTiling(expect)
         persistence(expect)
         storeCleanUp(expect)
         migration(expect)
@@ -813,6 +814,55 @@ enum WindowCommandTests {
                "the close and minimize buttons, and anything that is not a button, never open the menu")
     }
 
+    // MARK: The system's own drag tiling
+
+    private static func systemTiling(_ expect: (Bool, String) -> Void) {
+        // Only tiling a plain drag runs into counts against snapping.
+        let dragTilingOff: [String: Bool] = ["EnableTilingByEdgeDrag": false, "EnableTopTilingByEdgeDrag": false]
+        expect(!WindowEdgeSnapSupport.systemTilingEnabled { dragTilingOff[$0] },
+               "with edge and menu-bar tiling off, the Option tiling switch never keeps snapping from placing")
+        expect(WindowEdgeSnapSupport.systemTilingEnabled { _ in nil }
+                && WindowEdgeSnapSupport.systemTilingEnabled { $0 == "EnableTopTilingByEdgeDrag" },
+               "a tiling switch never written counts as on, and either drag switch on counts")
+        typealias Takeover = WindowSystemTilingTakeover
+        expect(Takeover.keys == ["EnableTilingByEdgeDrag", "EnableTopTilingByEdgeDrag"]
+                && !Takeover.keys.contains(WindowEdgeSnapSupport.optionTilingKey),
+               "snapping takes over the edge and menu-bar switches, never the Option one")
+
+        // Taking over and handing back, as Magnet does.
+        let neverWritten = Takeover.Switch(system: nil, saved: nil, written: nil, handedBack: nil)
+        let taken = Takeover.takingOver(neverWritten)
+        expect(taken == .init(system: 0, saved: Takeover.unset, written: 0, handedBack: nil)
+                && Takeover.handingBack(taken) == .init(system: nil, saved: nil, written: nil,
+                                                        handedBack: Takeover.unset),
+               "a switch never written goes off while snapping runs and is removed again afterwards")
+        let alreadyOff = Takeover.takingOver(.init(system: 0, saved: nil, written: nil, handedBack: nil))
+        expect(alreadyOff.isHeld && alreadyOff.saved == 0 && Takeover.handingBack(alreadyOff).system == 0,
+               "a switch the user had off is held too, so a later change is noticed, and stays off afterwards")
+        expect(Takeover.action(snappingWanted: true, switches: [neverWritten, neverWritten]) == .takeOver
+                && Takeover.action(snappingWanted: true, switches: [taken, alreadyOff]) == .none
+                && Takeover.action(snappingWanted: false, switches: [taken, alreadyOff]) == .handBack
+                && Takeover.action(snappingWanted: false, switches: [neverWritten, neverWritten]) == .none,
+               "snapping starting takes the switches over, stopping hands them back, nothing happens otherwise")
+
+        // Someone turning the system's tiling back on is asked about.
+        let turnedOnWhileHeld = Takeover.Switch(system: 1, saved: 1, written: 0, handedBack: nil)
+        expect(Takeover.action(snappingWanted: true, switches: [turnedOnWhileHeld, alreadyOff]) == .ask
+                && Takeover.handingBack(turnedOnWhileHeld) == .init(system: 1, saved: nil, written: nil,
+                                                                    handedBack: 1),
+               "tiling turned back on while snapping runs is asked about, and handing back leaves that choice")
+        expect(Takeover.takingOver(Takeover.handingBack(.init(system: 1, saved: 0, written: 0, handedBack: nil)))
+                == .init(system: 0, saved: 1, written: 0, handedBack: nil),
+               "keeping snapping switches tiling off again and brings the user's latest choice back afterwards")
+        expect(Takeover.action(snappingWanted: true,
+                               switches: [.init(system: 1, saved: nil, written: nil, handedBack: 0)]) == .ask
+                && Takeover.action(snappingWanted: true,
+                                   switches: [.init(system: 1, saved: nil, written: nil, handedBack: 1)]) == .takeOver
+                && Takeover.action(snappingWanted: true,
+                                   switches: [.init(system: 0, saved: nil, written: nil, handedBack: 1)]) == .takeOver,
+               "tiling turned on while Yaya's Space was away is asked about; one left as handed back, or turned off, is taken over quietly")
+    }
+
     // MARK: Restore on drag
 
     private static func restoreOnDrag(_ expect: (Bool, String) -> Void) {
@@ -1218,6 +1268,11 @@ enum WindowCommandTests {
                                             DefaultsKey.windowLayoutSystemZoomMenuWritten].contains($0.key) }
                 && Defaults.registeredDefaults[DefaultsKey.windowLayoutSystemZoomMenuSaved] == nil
                 && Defaults.registeredDefaults[DefaultsKey.windowLayoutSystemZoomMenuWritten] == nil,
+               "what this Mac's system menu preference was before stays on this Mac, unregistered")
+        expect([DefaultsKey.windowLayoutSystemTilingSaved, DefaultsKey.windowLayoutSystemTilingWritten,
+                DefaultsKey.windowLayoutSystemTilingHandedBack].allSatisfy { key in
+                    Defaults.registeredDefaults[key] == nil && !Sync.syncedKeys.contains { $0.key == key }
+                },
                "what this Mac's system menu preference was before stays on this Mac, unregistered")
         let observed = Set(Sync.observedKeys)
         expect(observed.isSuperset(of: Sync.syncedKeys.map(\.key))

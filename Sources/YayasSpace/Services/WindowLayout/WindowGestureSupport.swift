@@ -377,23 +377,94 @@ enum WindowEdgeSnapZone: String, CaseIterable {
     }
 }
 
+/// Switching macOS's own drag tiling off while drag snapping runs, the way
+/// Magnet does, and handing each switch back as it was found. A switch is
+/// 0 (off) or 1 (on); `unset` stands for one never written, which macOS
+/// treats as on.
+enum WindowSystemTilingTakeover {
+    static let domain = "com.apple.WindowManager"
+    /// Tiling by dropping on a screen edge and on the menu bar: both act on
+    /// the same drops as snapping, so both are switched off while it runs.
+    static let keys = ["EnableTilingByEdgeDrag", "EnableTopTilingByEdgeDrag"]
+    static let unset = -1
+    static let off = 0
+
+    struct Switch: Equatable {
+        /// The value now; nil when never written.
+        var system: Int?
+        /// The value found when snapping took the switch over; nil while
+        /// snapping does not hold it.
+        var saved: Int?
+        /// What snapping wrote, while it holds the switch.
+        var written: Int?
+        /// The value snapping left in place when it last handed the switch
+        /// back, to notice a change made while it was away.
+        var handedBack: Int?
+
+        var isHeld: Bool { saved != nil }
+        var isOn: Bool { system != off }
+    }
+
+    /// Whether someone else turned the switch since snapping last wrote it
+    /// or handed it back.
+    static func changedElsewhere(_ state: Switch) -> Bool {
+        let now = state.system ?? unset
+        if let written = state.written { return now != written }
+        if let handedBack = state.handedBack { return now != handedBack }
+        return false
+    }
+
+    /// Off, remembering the value found the first time.
+    static func takingOver(_ state: Switch) -> Switch {
+        Switch(system: off, saved: state.saved ?? state.system ?? unset, written: off, handedBack: nil)
+    }
+
+    /// The value found goes back, unless someone else turned the switch
+    /// since; that choice then stands. A switch not held is left alone.
+    static func handingBack(_ state: Switch) -> Switch {
+        guard let saved = state.saved else { return state }
+        let system = changedElsewhere(state) ? state.system : (saved == unset ? nil : saved)
+        return Switch(system: system, saved: nil, written: nil, handedBack: system ?? unset)
+    }
+
+    enum Action: Equatable {
+        case none
+        /// Switch the system's drag tiling off for snapping.
+        case takeOver
+        /// Someone turned the system's tiling back on behind snapping's back:
+        /// ask which of the two should handle drops.
+        case ask
+        /// Snapping stopped: put the switches back.
+        case handBack
+    }
+
+    /// What snapping does about the system's tiling, from whether it wants
+    /// to run and the state of each switch.
+    static func action(snappingWanted: Bool, switches: [Switch]) -> Action {
+        let held = switches.contains(where: \.isHeld)
+        guard snappingWanted else { return held ? .handBack : .none }
+        if switches.contains(where: { changedElsewhere($0) && $0.isOn }) { return .ask }
+        return held ? .none : .takeOver
+    }
+}
+
 enum WindowEdgeSnapSupport {
     static let resizeCornerDistance: CGFloat = 12
     static let resizeEdgeDistance: CGFloat = 5
     static let desktopAndDockSettingsURL = URL(
         string: "x-apple.systempreferences:com.apple.Desktop-Settings.extension"
     )!
-    private static let systemTilingKeys = [
-        "EnableTilingByEdgeDrag",
-        "EnableTilingOptionAccelerator",
-        "EnableTopTilingByEdgeDrag",
-    ]
+    /// The system tiling a plain drag runs into: dropping on a screen edge
+    /// and on the menu bar. Holding Option to tile is the user asking for
+    /// the system's tiling on purpose, so it never counts against snapping.
+    private static let systemTilingKeys = WindowSystemTilingTakeover.keys
+    static let optionTilingKey = "EnableTilingOptionAccelerator"
     private static let movementThreshold: CGFloat = 2
     private static let sizeTolerance: CGFloat = 2
 
     static var isSystemTilingEnabled: Bool {
         guard #available(macOS 15.0, *),
-              let defaults = UserDefaults(suiteName: "com.apple.WindowManager") else { return false }
+              let defaults = UserDefaults(suiteName: WindowSystemTilingTakeover.domain) else { return false }
         return systemTilingEnabled { key in
             guard defaults.object(forKey: key) != nil else { return nil }
             return defaults.bool(forKey: key)
@@ -405,6 +476,14 @@ enum WindowEdgeSnapSupport {
     /// testable without changing somebody's desktop settings.
     static func systemTilingEnabled(valueFor: (String) -> Bool?) -> Bool {
         systemTilingKeys.contains { valueFor($0) ?? true }
+    }
+
+    /// Whether holding Option while dragging tiles with the system; such a
+    /// drag is left to it.
+    static var isSystemOptionTilingEnabled: Bool {
+        guard #available(macOS 15.0, *),
+              let defaults = UserDefaults(suiteName: WindowSystemTilingTakeover.domain) else { return false }
+        return defaults.object(forKey: optionTilingKey) == nil || defaults.bool(forKey: optionTilingKey)
     }
 
     static var isSystemTopWindowOverviewDragEnabled: Bool {

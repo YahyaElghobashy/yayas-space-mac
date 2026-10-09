@@ -665,6 +665,12 @@ enum DefaultsKey {
     // and the value the menu wrote, so quitting hands it back.
     static let windowLayoutSystemZoomMenuSaved = "windowLayoutSystemZoomMenuSaved"
     static let windowLayoutSystemZoomMenuWritten = "windowLayoutSystemZoomMenuWritten"
+    // Machine state, never registered or exported: macOS's own drag tiling
+    // switches as found before drag snapping switched them off, what it
+    // wrote, and what it left in place when it last handed them back.
+    static let windowLayoutSystemTilingSaved = "windowLayoutSystemTilingSaved" // [switch: 0, 1 or -1 unset]
+    static let windowLayoutSystemTilingWritten = "windowLayoutSystemTilingWritten"
+    static let windowLayoutSystemTilingHandedBack = "windowLayoutSystemTilingHandedBack"
     static let windowLayoutFitTightly = "windowLayoutFitTightly" // no screen margin, window margin kept
     static let windowLayoutIgnoredApps = "windowLayoutIgnoredApps" // [bundle id]
     // Machine state, never exported: where this Mac syncs and when it last did.
