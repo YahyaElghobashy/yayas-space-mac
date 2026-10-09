@@ -428,6 +428,7 @@ struct WindowLayoutGeneralTab: View {
             Picker(text.greenButtonLayout, selection: $greenButtonLayoutRaw) {
                 Text(text.layoutList).tag(WindowGreenButtonMenuLayout.list.rawValue)
                 Text(text.layoutGrid).tag(WindowGreenButtonMenuLayout.grid.rawValue)
+                Text(text.layoutHorizontal).tag(WindowGreenButtonMenuLayout.horizontal.rawValue)
             }
             .pickerStyle(.menu)
             Picker(text.greenButtonSystemMenuKey, selection: $systemMenuKeyRaw) {

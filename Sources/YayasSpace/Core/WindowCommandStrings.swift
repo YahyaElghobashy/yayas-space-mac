@@ -72,6 +72,7 @@ struct WindowCommandStrings {
     let greenButtonLayout: String
     let layoutList: String
     let layoutGrid: String
+    let layoutHorizontal: String
     let greenButtonSystemMenuKey: String
     let systemMenuKeyControl: String
     let systemMenuKeyCommand: String
@@ -231,6 +232,7 @@ struct WindowCommandStrings {
         greenButtonLayout: "Menu layout",
         layoutList: "Full list",
         layoutGrid: "Compact grid",
+        layoutHorizontal: "Horizontal row",
         greenButtonSystemMenuKey: "Show the macOS menu while holding",
         systemMenuKeyControl: "Control (⌃)",
         systemMenuKeyCommand: "Command (⌘)",

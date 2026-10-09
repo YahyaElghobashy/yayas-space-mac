@@ -721,6 +721,47 @@ enum WindowCommandTests {
                 && screen.insetBy(dx: Placement.screenMargin, dy: Placement.screenMargin).contains(tall.frame),
                "a menu taller than the room scrolls, on screen, on the roomier side")
 
+        let wide = Placement.layout(buttonFrame: button, contentSize: CGSize(width: 2_000, height: 62),
+                                    visibleFrame: screen)
+        expect(wide.scrolls && wide.body.height == 62
+                && wide.frame.width == screen.width - 2 * Placement.screenMargin,
+               "a single row wider than the screen scrolls sideways, on screen")
+
+        // The three layouts, from the default set: 19 commands in six groups.
+        typealias Geometry = WindowGreenButtonMenuGeometry
+        let flags = WindowCommandMenuLayout.entries(of: set) { $0.showInGreenButtonMenu }.map(\.isSeparator)
+        let listed = Geometry.placement(isSeparator: flags, layout: .list)
+        let gridded = Geometry.placement(isSeparator: flags, layout: .grid)
+        let row = Geometry.placement(isSeparator: flags, layout: .horizontal)
+        expect(flags.filter { !$0 }.count == 19 && flags.filter { $0 }.count == 5
+                && listed.size == CGSize(width: 250, height: 513)
+                && gridded.size == CGSize(width: 184, height: 232),
+               "the list and the grid keep their sizes")
+        expect(row.commands.count == 19
+                && Set(row.commands.map(\.rect.minY)).count == 1
+                && zip(row.commands, row.commands.dropFirst()).allSatisfy {
+                    $0.rect.maxX < $1.rect.minX && $0.index < $1.index
+                },
+               "the horizontal row holds every command once, left to right in list order")
+        let roomAroundDividers = row.separators.compactMap { line -> (CGFloat, CGFloat)? in
+            guard let before = row.commands.last(where: { $0.rect.maxX <= line.minX }),
+                  let after = row.commands.first(where: { $0.rect.minX >= line.maxX }) else { return nil }
+            return (line.minX - before.rect.maxX, after.rect.minX - line.maxX)
+        }
+        expect(row.separators.count == 5 && roomAroundDividers.count == 5
+                && row.separators.allSatisfy { $0.width == 1 && $0.height == Geometry.cell.height - 10 }
+                && roomAroundDividers.allSatisfy { $0 == Geometry.dividerGap && $1 == Geometry.dividerGap },
+               "each group break in the row is an upright hairline with the same room on both sides")
+        expect(row.size == CGSize(width: 889, height: 62),
+               "the row is one glyph row with its caption underneath")
+        let ragged = Geometry.placement(isSeparator: [true, false, true, true, false, true], layout: .horizontal)
+        expect(ragged.commands.map(\.index) == [1, 4] && ragged.separators.count == 1,
+               "the row draws a divider only between two commands, never doubled, first or last")
+        expect(WindowGreenButtonMenuLayout.sanitized("horizontal") == .horizontal
+                && WindowGreenButtonMenuLayout.sanitized("ribbon") == .list
+                && WindowGreenButtonMenuLayout.allCases == [.list, .grid, .horizontal],
+               "the layout setting knows the list, the grid and the horizontal row, and falls back to the list")
+
         // The way from the button down to the menu counts as inside.
         let corridor = Placement.corridor(buttonFrame: button, menuFrame: hanging.frame)
         expect(corridor.contains(CGPoint(x: button.midX, y: button.minY - 4))

@@ -496,14 +496,17 @@ final class WindowGreenButtonMenuController {
         background.state = .active
         background.maskImage = WindowGreenButtonMenuShape.mask(size: bounds.size, outline: outline)
         if placement.scrolls {
-            // Too tall for the room beside the button: the commands scroll.
+            // Too tall, or as a single row too wide, for the room around the
+            // button: the commands scroll.
             let scroll = NSScrollView(frame: placement.body)
             scroll.drawsBackground = false
             scroll.borderType = .noBorder
-            scroll.hasVerticalScroller = true
+            scroll.hasVerticalScroller = size.height > placement.body.height
+            scroll.hasHorizontalScroller = size.width > placement.body.width
             scroll.autohidesScrollers = true
             scroll.scrollerStyle = .overlay
-            content.frame = CGRect(x: 0, y: 0, width: placement.body.width, height: size.height)
+            content.frame = CGRect(x: 0, y: 0, width: max(size.width, placement.body.width),
+                                   height: max(size.height, placement.body.height))
             scroll.documentView = content
             background.addSubview(scroll)
         } else {
@@ -624,14 +627,6 @@ private final class WindowGreenButtonMenuView: NSView {
     private var accessibilityItems: [WindowGreenButtonMenuElement] = []
     private(set) var preferredSize = CGSize(width: 200, height: 40)
 
-    private static let padding: CGFloat = 6
-    private static let rowHeight: CGFloat = 24
-    private static let separatorHeight: CGFloat = 9
-    private static let listWidth: CGFloat = 250
-    private static let cell = CGSize(width: 40, height: 30)
-    private static let gridColumns = 5
-    private static let footerHeight: CGFloat = 22
-
     override var isFlipped: Bool { true }
     override var isOpaque: Bool { false }
 
@@ -658,51 +653,11 @@ private final class WindowGreenButtonMenuView: NSView {
     override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
 
     private func buildLayout() {
-        slots = []
-        separators = []
-        let pad = Self.padding
-        switch layout {
-        case .list:
-            var y = pad
-            for (index, item) in items.enumerated() {
-                if item.command.isSeparator {
-                    separators.append(CGRect(x: pad + 8, y: y + Self.separatorHeight / 2,
-                                             width: Self.listWidth - pad * 2 - 16, height: 1))
-                    y += Self.separatorHeight
-                } else {
-                    slots.append((index, CGRect(x: pad, y: y, width: Self.listWidth - pad * 2, height: Self.rowHeight)))
-                    y += Self.rowHeight
-                }
-            }
-            preferredSize = CGSize(width: Self.listWidth, height: y + pad)
-        case .grid:
-            // Each group of the list starts a row of its own.
-            var x = pad
-            var y = pad
-            var column = 0
-            var widest: CGFloat = 0
-            for (index, item) in items.enumerated() {
-                if item.command.isSeparator {
-                    if column > 0 {
-                        y += Self.cell.height + 4
-                        x = pad
-                        column = 0
-                    }
-                    continue
-                }
-                if column == Self.gridColumns {
-                    y += Self.cell.height + 4
-                    x = pad
-                    column = 0
-                }
-                slots.append((index, CGRect(x: x, y: y, width: Self.cell.width, height: Self.cell.height)))
-                x += Self.cell.width + 4
-                widest = max(widest, x)
-                column += 1
-            }
-            if column > 0 { y += Self.cell.height + 4 }
-            preferredSize = CGSize(width: max(widest - 4 + pad, 150), height: y + Self.footerHeight)
-        }
+        let placement = WindowGreenButtonMenuGeometry.placement(isSeparator: items.map(\.command.isSeparator),
+                                                                layout: layout)
+        slots = placement.commands.map { ($0.index, $0.rect) }
+        separators = placement.separators
+        preferredSize = placement.size
     }
 
     // MARK: Accessibility
@@ -816,13 +771,13 @@ private final class WindowGreenButtonMenuView: NSView {
                                        width: rect.maxX - glyphRect.maxX - 20 - shortcutWidth,
                                        height: titleSize.height)
                 title.draw(with: titleRect, options: [.usesLineFragmentOrigin, .truncatesLastVisibleLine])
-            case .grid:
+            case .grid, .horizontal:
                 let glyphRect = CGRect(x: rect.midX - 13, y: rect.midY - 8.5, width: 26, height: 17)
                 WindowCommandGlyph.draw(item.command.kind, grid: grid, in: glyphRect, context: context,
                                         style: isHovered ? .onAccent : glyphStyle)
             }
         }
-        if layout == .grid {
+        if layout != .list {
             let caption: String
             if let hovered {
                 let item = items[hovered]
@@ -835,8 +790,9 @@ private final class WindowGreenButtonMenuView: NSView {
                                           attributes: [.font: NSFont.systemFont(ofSize: 11),
                                                        .foregroundColor: NSColor.secondaryLabelColor])
             let size = text.size()
+            let footer = WindowGreenButtonMenuGeometry.footerHeight
             text.draw(at: CGPoint(x: (bounds.width - size.width) / 2,
-                                  y: bounds.height - Self.footerHeight + (Self.footerHeight - size.height) / 2 - 2))
+                                  y: bounds.height - footer + (footer - size.height) / 2 - 2))
         }
     }
 }

@@ -491,7 +491,8 @@ enum WindowGreenButtonMenuPlacement {
         /// Where the arrow's tip sits along the panel's width.
         var arrowX: CGFloat
         var edge: Edge
-        /// The body is shorter than the commands, which then scroll.
+        /// The body is shorter or narrower than the commands, which then
+        /// scroll.
         var scrolls: Bool
     }
 
@@ -523,7 +524,7 @@ enum WindowGreenButtonMenuPlacement {
             body = CGRect(x: 0, y: arrowSize.height, width: width, height: bodyHeight)
         }
         return Layout(frame: frame, body: body, arrowX: arrowX, edge: edge,
-                      scrolls: bodyHeight < contentSize.height)
+                      scrolls: bodyHeight < contentSize.height || width < contentSize.width)
     }
 
     /// The way from the button to the menu, which counts as inside for the
@@ -763,12 +764,15 @@ enum WindowLayoutPreviewStyle: String, CaseIterable, Identifiable {
     }
 }
 
-/// The two layouts of the green-button menu.
+/// The three layouts of the green-button menu.
 enum WindowGreenButtonMenuLayout: String, CaseIterable, Identifiable {
     /// One row per command: glyph, name and shortcut.
     case list
-    /// Glyphs only, in a grid.
+    /// Glyphs only, in a grid: each group of the list starts a row.
     case grid
+    /// Glyphs only, every command in one row, the groups set apart by thin
+    /// dividers.
+    case horizontal
 
     var id: String { rawValue }
 
@@ -786,6 +790,111 @@ enum WindowGreenButtonMenuLayout: String, CaseIterable, Identifiable {
     /// Hit-testing never runs faster than this, however short the delay:
     /// the pointer has to rest this long before anything is asked.
     static let minimumRest: TimeInterval = 1.0 / 30.0
+}
+
+/// Where each command and separator of the green-button menu sits, in the
+/// menu's own space (origin top-left, y growing down), and the size the menu
+/// asks for. Commands are given by their place in the menu's entries.
+enum WindowGreenButtonMenuGeometry {
+    static let padding: CGFloat = 6
+    static let rowHeight: CGFloat = 24
+    static let separatorHeight: CGFloat = 9
+    static let listWidth: CGFloat = 250
+    static let cell = CGSize(width: 40, height: 30)
+    static let cellGap: CGFloat = 4
+    static let gridColumns = 5
+    /// The caption under the glyph layouts: the command under the pointer.
+    static let footerHeight: CGFloat = 22
+    /// The room on either side of a divider in the single row.
+    static let dividerGap: CGFloat = 6
+    /// The narrowest a glyph layout gets, so its caption still fits.
+    static let minimumGlyphWidth: CGFloat = 150
+
+    struct Slot: Equatable {
+        var index: Int
+        var rect: CGRect
+    }
+
+    struct Placement: Equatable {
+        var commands: [Slot]
+        var separators: [CGRect]
+        var size: CGSize
+    }
+
+    /// `isSeparator` holds one flag per menu entry, in order.
+    static func placement(isSeparator: [Bool], layout: WindowGreenButtonMenuLayout) -> Placement {
+        var commands: [Slot] = []
+        var separators: [CGRect] = []
+        let pad = padding
+        switch layout {
+        case .list:
+            var y = pad
+            for (index, separator) in isSeparator.enumerated() {
+                if separator {
+                    separators.append(CGRect(x: pad + 8, y: y + separatorHeight / 2,
+                                             width: listWidth - pad * 2 - 16, height: 1))
+                    y += separatorHeight
+                } else {
+                    commands.append(Slot(index: index, rect: CGRect(x: pad, y: y, width: listWidth - pad * 2,
+                                                                    height: rowHeight)))
+                    y += rowHeight
+                }
+            }
+            return Placement(commands: commands, separators: separators,
+                             size: CGSize(width: listWidth, height: y + pad))
+        case .grid:
+            // Each group of the list starts a row of its own.
+            var x = pad
+            var y = pad
+            var column = 0
+            var widest: CGFloat = 0
+            for (index, separator) in isSeparator.enumerated() {
+                if separator {
+                    if column > 0 {
+                        y += cell.height + cellGap
+                        x = pad
+                        column = 0
+                    }
+                    continue
+                }
+                if column == gridColumns {
+                    y += cell.height + cellGap
+                    x = pad
+                    column = 0
+                }
+                commands.append(Slot(index: index, rect: CGRect(origin: CGPoint(x: x, y: y), size: cell)))
+                x += cell.width + cellGap
+                widest = max(widest, x)
+                column += 1
+            }
+            if column > 0 { y += cell.height + cellGap }
+            return Placement(commands: commands, separators: separators,
+                             size: CGSize(width: max(widest - cellGap + pad, minimumGlyphWidth),
+                                          height: y + footerHeight))
+        case .horizontal:
+            // One row in list order; a group break between two commands is
+            // an upright hairline with the same room on both sides.
+            var x = pad
+            var pendingBreak = false
+            for (index, separator) in isSeparator.enumerated() {
+                if separator {
+                    pendingBreak = !commands.isEmpty
+                    continue
+                }
+                if pendingBreak {
+                    let line = x - cellGap + dividerGap
+                    separators.append(CGRect(x: line, y: pad + 5, width: 1, height: cell.height - 10))
+                    x = line + 1 + dividerGap
+                    pendingBreak = false
+                }
+                commands.append(Slot(index: index, rect: CGRect(origin: CGPoint(x: x, y: pad), size: cell)))
+                x += cell.width + cellGap
+            }
+            return Placement(commands: commands, separators: separators,
+                             size: CGSize(width: max(x - cellGap + pad, minimumGlyphWidth),
+                                          height: pad + cell.height + cellGap + footerHeight))
+        }
+    }
 }
 
 /// Which key, held while the pointer rests on the green button, shows the
