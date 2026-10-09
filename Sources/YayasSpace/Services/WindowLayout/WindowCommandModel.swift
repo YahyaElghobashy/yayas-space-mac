@@ -287,6 +287,52 @@ enum WindowActivationRegion: Equatable, Hashable {
         }
     }
 
+    /// Whether two regions claim one part of the screen: the same corner,
+    /// spans of one edge that share a unit, or inner rectangles that share a
+    /// cell. Regions of different kinds never claim the same part; the
+    /// priority between kinds settles where they meet.
+    func sharesArea(with other: WindowActivationRegion) -> Bool {
+        switch (self, other) {
+        case let (.corner(a), .corner(b)):
+            return a == b
+        case let (.edge(edgeA, startA, endA), .edge(edgeB, startB, endB)):
+            return edgeA == edgeB && max(startA, startB) < min(endA, endB)
+        case let (.interior(a), .interior(b)):
+            return max(a.x, b.x) < min(a.maxX, b.maxX) && max(a.y, b.y) < min(a.maxY, b.maxY)
+        default:
+            return false
+        }
+    }
+
+    /// What this region keeps once `taker` takes the part they share: the
+    /// longer leftover of an edge span (the one before it on a tie), the
+    /// largest leftover band of an inner rectangle, nothing of a corner.
+    /// A region that shares nothing with `taker` keeps all of itself.
+    func remainder(after taker: WindowActivationRegion) -> WindowActivationRegion? {
+        guard sharesArea(with: taker) else { return self }
+        switch (self, taker) {
+        case let (.edge(edge, start, end), .edge(_, takenStart, takenEnd)):
+            let before = max(0, min(end, takenStart) - start)
+            let after = max(0, end - max(start, takenEnd))
+            if before == 0 && after == 0 { return nil }
+            return before >= after ? .edge(edge, start: start, end: start + before)
+                : .edge(edge, start: end - after, end: end)
+        case let (.interior(rect), .interior(taken)):
+            let overlap = GridRect(x: max(rect.x, taken.x), y: max(rect.y, taken.y),
+                                   width: min(rect.maxX, taken.maxX) - max(rect.x, taken.x),
+                                   height: min(rect.maxY, taken.maxY) - max(rect.y, taken.y))
+            let bands = [
+                GridRect(x: rect.x, y: rect.y, width: overlap.x - rect.x, height: rect.height),
+                GridRect(x: overlap.maxX, y: rect.y, width: rect.maxX - overlap.maxX, height: rect.height),
+                GridRect(x: rect.x, y: rect.y, width: rect.width, height: overlap.y - rect.y),
+                GridRect(x: rect.x, y: overlap.maxY, width: rect.width, height: rect.maxY - overlap.maxY),
+            ].filter { $0.width > 0 && $0.height > 0 }
+            return bands.max { $0.width * $0.height < $1.width * $1.height }.map { .interior($0) }
+        default:
+            return nil
+        }
+    }
+
     /// The visual zone of the earlier fixed edge-snap picker this region
     /// sits in. Used once, to carry zones someone switched off into the
     /// per-command switches.

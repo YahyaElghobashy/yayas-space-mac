@@ -656,6 +656,10 @@ enum DefaultsKey {
     static let windowLayoutEdgeAreaWidth = "windowLayoutEdgeAreaWidth" // points
     static let windowLayoutPreviewStyle = "windowLayoutPreviewStyle" // WindowLayoutPreviewStyle raw value
     static let windowLayoutPreviewBorderWidth = "windowLayoutPreviewBorderWidth" // points
+    static let windowLayoutPreviewColor = "windowLayoutPreviewColor" // "#RRGGBB"; empty = accent colour
+    static let windowLayoutAreaStyle = "windowLayoutAreaStyle" // WindowLayoutAreaStyle raw value
+    static let windowLayoutAreaColor = "windowLayoutAreaColor" // "#RRGGBB"; empty = accent colour
+    static let windowLayoutAreaBorderWidth = "windowLayoutAreaBorderWidth" // points
     static let windowLayoutGreenButtonMenuEnabled = "windowLayoutGreenButtonMenuEnabled"
     static let windowLayoutGreenButtonDelay = "windowLayoutGreenButtonDelay" // milliseconds
     static let windowLayoutGreenButtonLayout = "windowLayoutGreenButtonLayout" // WindowGreenButtonMenuLayout raw value
@@ -1430,6 +1434,10 @@ enum Defaults {
         DefaultsKey.windowLayoutEdgeAreaWidth: WindowActivationSettings.defaultEdgeWidth,
         DefaultsKey.windowLayoutPreviewStyle: WindowLayoutPreviewStyle.system.rawValue,
         DefaultsKey.windowLayoutPreviewBorderWidth: WindowLayoutPreviewStyle.defaultBorderWidth,
+        DefaultsKey.windowLayoutPreviewColor: "",
+        DefaultsKey.windowLayoutAreaStyle: WindowLayoutAreaStyle.automatic.rawValue,
+        DefaultsKey.windowLayoutAreaColor: "",
+        DefaultsKey.windowLayoutAreaBorderWidth: WindowLayoutAreaStyle.defaultBorderWidth,
         DefaultsKey.windowLayoutGreenButtonMenuEnabled: false,
         DefaultsKey.windowLayoutGreenButtonDelay: WindowGreenButtonMenuLayout.defaultDelayMilliseconds,
         DefaultsKey.windowLayoutGreenButtonLayout: WindowGreenButtonMenuLayout.list.rawValue,

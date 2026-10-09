@@ -29,6 +29,11 @@ struct WindowCommandStrings {
     let lastSyncedFormat: String
     let neverSynced: String
     let syncConflictFormat: String
+    let syncChoiceTitle: String
+    let syncChoiceMessageFormat: String
+    let syncChoiceMessage: String
+    let syncChoiceUseFolder: String
+    let syncChoiceKeepMac: String
     let dismiss: String
     let exported: String
     let imported: String
@@ -67,7 +72,12 @@ struct WindowCommandStrings {
     let styleSystem: String
     let styleLight: String
     let styleDark: String
+    let styleInverse: String
     let styleAccent: String
+    let styleCustom: String
+    let pickedColor: String
+    let areaColor: String
+    let areaOutline: String
     let previewBorder: String
 
     // Green button
@@ -102,6 +112,9 @@ struct WindowCommandStrings {
     let resetAll: String
     let resetAllTitle: String
     let resetAllMessage: String
+    let resetEverything: String
+    let resetCommandsOnly: String
+    let resetSettingsOnly: String
     let reset: String
     let cancel: String
 
@@ -150,6 +163,9 @@ struct WindowCommandStrings {
     let regionBottomRightCorner: String
     let regionInteriorFormat: String
     let clearDragArea: String
+    let areaTakenTitleFormat: String
+    let areaTakenMessageFormat: String
+    let areaTakenMove: String
     let draggingOffNote: String
     let showTitle: String
     let showInMenuBar: String
@@ -201,6 +217,11 @@ struct WindowCommandStrings {
         lastSyncedFormat: "Last synced %@",
         neverSynced: "Not synced yet",
         syncConflictFormat: "Both this Mac and %@ changed these settings since the last sync. The newer copy, from %@, was kept.",
+        syncChoiceTitle: "This folder already has Window Layout settings",
+        syncChoiceMessageFormat: "Its settings file was last changed %@. Use those settings on this Mac, or replace them with this Mac’s?",
+        syncChoiceMessage: "Use the settings in this folder on this Mac, or replace them with this Mac’s?",
+        syncChoiceUseFolder: "Use the Folder’s Settings",
+        syncChoiceKeepMac: "Keep This Mac’s Settings",
         dismiss: "Dismiss",
         exported: "Settings exported.",
         imported: "Settings imported.",
@@ -235,7 +256,12 @@ struct WindowCommandStrings {
         styleSystem: "Match system",
         styleLight: "Light",
         styleDark: "Dark",
+        styleInverse: "Opposite of system",
         styleAccent: "Accent color",
+        styleCustom: "Custom color",
+        pickedColor: "Color",
+        areaColor: "Area color",
+        areaOutline: "Area outline",
         previewBorder: "Preview border",
         greenButtonSection: "Green-Button Menu",
         greenButtonMenu: "Open a command menu from the green button",
@@ -261,7 +287,10 @@ struct WindowCommandStrings {
         resetSection: "Reset",
         resetAll: "Reset Window Layout…",
         resetAllTitle: "Reset Window Layout?",
-        resetAllMessage: "Every command, shortcut, drag area and setting on these two tabs returns to how it shipped. Snapping, shortcuts and the green-button menu stay off.",
+        resetAllMessage: "Commands are the placements with their shortcuts and drag areas; settings are everything else on these two tabs. Either or both go back to how they shipped, with snapping, shortcuts and the green-button menu off.",
+        resetEverything: "Reset Everything",
+        resetCommandsOnly: "Reset Commands Only",
+        resetSettingsOnly: "Reset Settings Only",
         reset: "Reset",
         cancel: "Cancel",
         pointsFormat: "%d pt",
@@ -306,6 +335,9 @@ struct WindowCommandStrings {
         regionBottomRightCorner: "Bottom right corner",
         regionInteriorFormat: "Area inside the screen, %@ of its width and %@ of its height",
         clearDragArea: "Clear",
+        areaTakenTitleFormat: "This drag area belongs to “%@”",
+        areaTakenMessageFormat: "Move it to “%@”? “%@” keeps whatever part does not overlap, if any.",
+        areaTakenMove: "Move Drag Area",
         draggingOffNote: "Snapping by dragging is off. Turn it on in General.",
         showTitle: "Show in",
         showInMenuBar: "The menu bar menu",

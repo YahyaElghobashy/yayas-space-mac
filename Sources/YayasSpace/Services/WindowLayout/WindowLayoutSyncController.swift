@@ -50,6 +50,9 @@ final class WindowLayoutSyncController: ObservableObject {
     private var syncInFlight = false
     private var syncRequestedAgain = false
     private var downloadRetries = 0
+    /// Which copy wins the first sync with a newly chosen folder that
+    /// already held a settings file; the user picked it.
+    private var firstSyncChoice: WindowLayoutSyncSupport.FirstSyncChoice?
     /// Whether the status line shows a sync result (a later good sync clears
     /// it) rather than the result of an export or import.
     private var statusFromSync = false
@@ -68,6 +71,7 @@ final class WindowLayoutSyncController: ObservableObject {
         /// The real time of this Mac's last change; 0 when never changed.
         let localModifiedAt: TimeInterval
         let lastSyncedAt: TimeInterval
+        let choice: WindowLayoutSyncSupport.FirstSyncChoice?
         let local: WindowLayoutSyncSupport.Document
     }
 
@@ -187,9 +191,38 @@ final class WindowLayoutSyncController: ObservableObject {
         panel.prompt = strings.chooseSyncFolder.replacingOccurrences(of: "…", with: "")
         NSApp.activate(ignoringOtherApps: true)
         guard panel.runModal() == .OK, let url = panel.url else { return }
+        // A folder that already holds settings, from another Mac or an
+        // earlier sync: the user says which copy both use, as Magnet asks.
+        var choice: WindowLayoutSyncSupport.FirstSyncChoice?
+        let existing = url.appendingPathComponent(WindowLayoutSyncSupport.fileName)
+        if FileManager.default.fileExists(atPath: existing.path) {
+            guard let picked = askFirstSyncChoice(for: existing) else { return }
+            choice = picked
+        }
         setFolder(url.path)
+        firstSyncChoice = choice
         downloadRetries = 0
         requestFolderSync()
+    }
+
+    /// Nil when the user cancels: the folder is not used then.
+    private func askFirstSyncChoice(for file: URL) -> WindowLayoutSyncSupport.FirstSyncChoice? {
+        let alert = NSAlert()
+        alert.messageText = strings.syncChoiceTitle
+        let changed = (try? FileManager.default.attributesOfItem(atPath: file.path))?[.modificationDate] as? Date
+        alert.informativeText = changed.map {
+            String(format: strings.syncChoiceMessageFormat,
+                   DateFormatter.localizedString(from: $0, dateStyle: .medium, timeStyle: .short))
+        } ?? strings.syncChoiceMessage
+        alert.addButton(withTitle: strings.syncChoiceUseFolder)
+        alert.addButton(withTitle: strings.syncChoiceKeepMac)
+        alert.addButton(withTitle: strings.cancel)
+        NSApp.activate(ignoringOtherApps: true)
+        switch alert.runModal() {
+        case .alertFirstButtonReturn: return .useFile
+        case .alertSecondButtonReturn: return .keepThisMac
+        default: return nil
+        }
     }
 
     func stopSyncing() {
@@ -210,6 +243,7 @@ final class WindowLayoutSyncController: ObservableObject {
 
     private func setFolder(_ path: String?) {
         folderPath = path
+        firstSyncChoice = nil
         UserDefaults.standard.set(path ?? "", forKey: DefaultsKey.windowLayoutSyncFolder)
         // A new folder starts a new history: nothing has been synced to it.
         UserDefaults.standard.set(0.0, forKey: DefaultsKey.windowLayoutSyncedAt)
@@ -219,6 +253,8 @@ final class WindowLayoutSyncController: ObservableObject {
     /// Notes a finished sync: the change time both sides now share, which
     /// the next sync measures changes against, and when it happened.
     private func recordSync(baseline: TimeInterval) {
+        // The first sync with a new folder is done: the user's choice is used up.
+        firstSyncChoice = nil
         UserDefaults.standard.set(baseline, forKey: DefaultsKey.windowLayoutSyncedAt)
         lastSyncedAt = Date()
         if statusFromSync { clearStatus() }
@@ -246,6 +282,7 @@ final class WindowLayoutSyncController: ObservableObject {
         let request = FolderSyncRequest(fileURL: fileURL,
                                         localModifiedAt: localModifiedAt,
                                         lastSyncedAt: defaults.double(forKey: DefaultsKey.windowLayoutSyncedAt),
+                                        choice: firstSyncChoice,
                                         local: localDocument(modifiedAt: localModifiedAt))
         io.async { [weak self] in
             let outcome = Self.performFolderSync(request)
@@ -278,7 +315,8 @@ final class WindowLayoutSyncController: ObservableObject {
         }
         let (decision, conflict) = WindowLayoutSyncSupport.decide(localModifiedAt: request.localModifiedAt,
                                                                   fileModifiedAt: document?.modifiedAt,
-                                                                  lastSyncedAt: request.lastSyncedAt)
+                                                                  lastSyncedAt: request.lastSyncedAt,
+                                                                  choice: request.choice)
         switch decision {
         case .none:
             return .inStep(baseline: request.localModifiedAt)

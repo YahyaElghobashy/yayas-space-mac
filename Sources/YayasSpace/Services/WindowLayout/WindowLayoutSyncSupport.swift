@@ -36,6 +36,10 @@ enum WindowLayoutSyncSupport {
         (DefaultsKey.windowLayoutEdgeAreaWidth, .integer),
         (DefaultsKey.windowLayoutPreviewStyle, .string),
         (DefaultsKey.windowLayoutPreviewBorderWidth, .integer),
+        (DefaultsKey.windowLayoutPreviewColor, .string),
+        (DefaultsKey.windowLayoutAreaStyle, .string),
+        (DefaultsKey.windowLayoutAreaColor, .string),
+        (DefaultsKey.windowLayoutAreaBorderWidth, .integer),
         (DefaultsKey.windowLayoutGreenButtonMenuEnabled, .bool),
         (DefaultsKey.windowLayoutGreenButtonDelay, .integer),
         (DefaultsKey.windowLayoutGreenButtonLayout, .string),
@@ -167,6 +171,13 @@ enum WindowLayoutSyncSupport {
         case writeLocal
     }
 
+    /// What the user picked when a newly chosen folder already held a
+    /// settings file.
+    enum FirstSyncChoice: Equatable {
+        case useFile
+        case keepThisMac
+    }
+
     /// Last writer wins. `localModifiedAt` is the real time of this Mac's
     /// last change, 0 when nothing was ever changed here, so an untouched
     /// setup never outranks a file someone did change. A conflict is when
@@ -176,8 +187,16 @@ enum WindowLayoutSyncSupport {
     static func decide(localModifiedAt: TimeInterval,
                        fileModifiedAt: TimeInterval?,
                        lastSyncedAt: TimeInterval,
+                       choice: FirstSyncChoice? = nil,
                        tolerance: TimeInterval = 0.5) -> (decision: Decision, conflict: Bool) {
         guard let fileModifiedAt else { return (.writeLocal, false) }
+        // A folder just chosen that already held a file: the user said which
+        // copy both Macs use, whatever the clocks say.
+        switch choice {
+        case .useFile: return (.adoptFile, false)
+        case .keepThisMac: return (.writeLocal, false)
+        case nil: break
+        }
         if abs(fileModifiedAt - localModifiedAt) <= tolerance { return (.none, false) }
         let hasSyncedBefore = lastSyncedAt > 0
         let localChanged = localModifiedAt > lastSyncedAt + tolerance

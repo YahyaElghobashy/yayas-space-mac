@@ -143,6 +143,11 @@ struct WindowLayoutGeneralTab: View {
         WindowLayoutPreviewStyle.system.rawValue
     @AppStorage(DefaultsKey.windowLayoutPreviewBorderWidth) private var previewBorder =
         WindowLayoutPreviewStyle.defaultBorderWidth
+    @AppStorage(DefaultsKey.windowLayoutPreviewColor) private var previewColorHex = ""
+    @AppStorage(DefaultsKey.windowLayoutAreaStyle) private var areaStyleRaw = WindowLayoutAreaStyle.automatic.rawValue
+    @AppStorage(DefaultsKey.windowLayoutAreaColor) private var areaColorHex = ""
+    @AppStorage(DefaultsKey.windowLayoutAreaBorderWidth) private var areaBorder =
+        WindowLayoutAreaStyle.defaultBorderWidth
     @AppStorage(DefaultsKey.windowLayoutGreenButtonMenuEnabled) private var greenButtonEnabled = false
     @AppStorage(DefaultsKey.windowLayoutGreenButtonDelay) private var greenButtonDelay =
         WindowGreenButtonMenuLayout.defaultDelayMilliseconds
@@ -203,12 +208,24 @@ struct WindowLayoutGeneralTab: View {
         .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
             refreshSystemState()
         }
-        .alert(text.resetAllTitle, isPresented: $confirmingReset) {
-            Button(text.reset, role: .destructive) { WindowLayoutSettingsActions.resetAll() }
+        .confirmationDialog(text.resetAllTitle, isPresented: $confirmingReset, titleVisibility: .visible) {
+            Button(text.resetEverything, role: .destructive) { WindowLayoutSettingsActions.resetAll() }
+            Button(text.resetCommandsOnly, role: .destructive) { WindowLayoutSettingsActions.resetCommands() }
+            Button(text.resetSettingsOnly, role: .destructive) { WindowLayoutSettingsActions.resetPreferences() }
             Button(text.cancel, role: .cancel) {}
         } message: {
             Text(text.resetAllMessage)
         }
+    }
+
+    /// A colour well over a "#RRGGBB" preference; an empty one shows the
+    /// accent colour until a colour is picked.
+    private func colorBinding(_ hex: Binding<String>) -> Binding<Color> {
+        Binding(
+            get: { Color(nsColor: WindowLayoutColor(hex: hex.wrappedValue)?.nsColor ?? .controlAccentColor) },
+            set: { color in
+                if let picked = WindowLayoutColor(nsColor: NSColor(color)) { hex.wrappedValue = picked.hex }
+            })
     }
 
     // MARK: Sections
@@ -392,6 +409,21 @@ struct WindowLayoutGeneralTab: View {
     private var areasSection: some View {
         Section(text.areasSection) {
             Toggle(text.highlightAreas, isOn: $highlightAreas)
+            if highlightAreas {
+                Picker(text.areaColor, selection: $areaStyleRaw) {
+                    Text(text.styleAccent).tag(WindowLayoutAreaStyle.automatic.rawValue)
+                    Text(text.styleCustom).tag(WindowLayoutAreaStyle.custom.rawValue)
+                }
+                .pickerStyle(.menu)
+                if WindowLayoutAreaStyle.sanitized(areaStyleRaw) == .custom {
+                    ColorPicker(text.pickedColor, selection: colorBinding($areaColorHex), supportsOpacity: false)
+                }
+                WindowLayoutStepperRow(title: text.areaOutline,
+                                       value: $areaBorder,
+                                       range: WindowLayoutAreaStyle.borderWidthRange,
+                                       step: 1,
+                                       format: text.pointsFormat)
+            }
             WindowLayoutStepperRow(title: text.interiorScale,
                                    value: $interiorScale,
                                    range: WindowActivationSettings.interiorScaleRange,
@@ -411,9 +443,14 @@ struct WindowLayoutGeneralTab: View {
                 Text(text.styleSystem).tag(WindowLayoutPreviewStyle.system.rawValue)
                 Text(text.styleLight).tag(WindowLayoutPreviewStyle.light.rawValue)
                 Text(text.styleDark).tag(WindowLayoutPreviewStyle.dark.rawValue)
+                Text(text.styleInverse).tag(WindowLayoutPreviewStyle.inverse.rawValue)
                 Text(text.styleAccent).tag(WindowLayoutPreviewStyle.accent.rawValue)
+                Text(text.styleCustom).tag(WindowLayoutPreviewStyle.custom.rawValue)
             }
             .pickerStyle(.menu)
+            if WindowLayoutPreviewStyle.sanitized(previewStyleRaw) == .custom {
+                ColorPicker(text.pickedColor, selection: colorBinding($previewColorHex), supportsOpacity: false)
+            }
             WindowLayoutStepperRow(title: text.previewBorder,
                                    value: $previewBorder,
                                    range: WindowLayoutPreviewStyle.borderWidthRange,
@@ -581,6 +618,10 @@ enum WindowLayoutSettingsActions {
         DefaultsKey.windowLayoutEdgeAreaWidth,
         DefaultsKey.windowLayoutPreviewStyle,
         DefaultsKey.windowLayoutPreviewBorderWidth,
+        DefaultsKey.windowLayoutPreviewColor,
+        DefaultsKey.windowLayoutAreaStyle,
+        DefaultsKey.windowLayoutAreaColor,
+        DefaultsKey.windowLayoutAreaBorderWidth,
         DefaultsKey.windowLayoutGreenButtonMenuEnabled,
         DefaultsKey.windowLayoutGreenButtonDelay,
         DefaultsKey.windowLayoutGreenButtonLayout,
@@ -593,10 +634,22 @@ enum WindowLayoutSettingsActions {
     ]
 
     static func resetAll() {
-        let defaults = UserDefaults.standard
-        for key in resettableKeys { defaults.removeObject(forKey: key) }
+        resetPreferences(sync: false)
+        resetCommands()
+    }
+
+    /// Both command sets back to their defaults: placements, shortcuts and
+    /// drag areas. Every other setting stays.
+    static func resetCommands() {
         WindowCommandStore.shared.resetToDefaults(.horizontal)
         WindowCommandStore.shared.resetToDefaults(.vertical)
         WindowLayoutService.shared.syncWithPreferences()
+    }
+
+    /// Every other setting on the two tabs; the commands stay as they are.
+    static func resetPreferences(sync: Bool = true) {
+        let defaults = UserDefaults.standard
+        for key in resettableKeys { defaults.removeObject(forKey: key) }
+        if sync { WindowLayoutService.shared.syncWithPreferences() }
     }
 }

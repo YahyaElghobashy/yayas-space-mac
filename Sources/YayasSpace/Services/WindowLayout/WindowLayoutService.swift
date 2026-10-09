@@ -3347,15 +3347,31 @@ private final class WindowEdgeSnapPreviewView: NSView {
         layer.cornerCurve = .continuous
         layer.borderWidth = border
         switch style {
-        case .accent:
-            let accent = NSColor.controlAccentColor
+        case .accent, .custom:
+            // A picked colour falls back to the accent colour until one is set.
+            let tint = style == .custom
+                ? WindowLayoutColor(hex: defaults.string(forKey: DefaultsKey.windowLayoutPreviewColor))?.nsColor
+                    ?? NSColor.controlAccentColor
+                : NSColor.controlAccentColor
             material.isHidden = true
-            layer.backgroundColor = accent.withAlphaComponent(0.16).cgColor
-            layer.borderColor = accent.withAlphaComponent(0.88).cgColor
-        case .system, .light, .dark:
+            layer.backgroundColor = tint.withAlphaComponent(0.16).cgColor
+            layer.borderColor = tint.withAlphaComponent(0.88).cgColor
+        case .system, .light, .dark, .inverse:
             material.isHidden = false
-            let forced: NSAppearance? = style == .light ? NSAppearance(named: .aqua)
-                : style == .dark ? NSAppearance(named: .darkAqua) : nil
+            let forced: NSAppearance?
+            switch style {
+            case .light:
+                forced = NSAppearance(named: .aqua)
+            case .dark:
+                forced = NSAppearance(named: .darkAqua)
+            case .inverse:
+                // The opposite of the system's own look, read from the app
+                // so this view's forced look never feeds back into it.
+                let systemIsDark = NSApp.effectiveAppearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
+                forced = NSAppearance(named: systemIsDark ? .aqua : .darkAqua)
+            default:
+                forced = nil
+            }
             // Assigned only on a real change: setting an appearance calls
             // back into viewDidChangeEffectiveAppearance.
             if material.appearance?.name != forced?.name { material.appearance = forced }

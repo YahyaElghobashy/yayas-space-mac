@@ -741,14 +741,66 @@ enum WindowLayoutIgnoreList {
     }
 }
 
+/// A colour picked for the drag areas or the preview, kept as "#RRGGBB" so
+/// it travels in the sync file as plain text. Opaque: each use applies its
+/// own transparency.
+struct WindowLayoutColor: Equatable {
+    let red: Int
+    let green: Int
+    let blue: Int
+
+    init(red: Int, green: Int, blue: Int) {
+        self.red = min(max(red, 0), 255)
+        self.green = min(max(green, 0), 255)
+        self.blue = min(max(blue, 0), 255)
+    }
+
+    /// "#RRGGBB" or "RRGGBB", either case; nil for anything else.
+    init?(hex: String?) {
+        guard var text = hex?.trimmingCharacters(in: .whitespacesAndNewlines) else { return nil }
+        if text.hasPrefix("#") { text.removeFirst() }
+        guard text.count == 6, text.allSatisfy(\.isHexDigit), let value = Int(text, radix: 16) else { return nil }
+        self.init(red: value >> 16 & 0xFF, green: value >> 8 & 0xFF, blue: value & 0xFF)
+    }
+
+    var hex: String { String(format: "#%02X%02X%02X", red, green, blue) }
+}
+
+/// How the drag areas look while they are shown during a drag.
+enum WindowLayoutAreaStyle: String, CaseIterable, Identifiable {
+    /// The system's accent colour.
+    case automatic
+    /// A colour of the user's own (`windowLayoutAreaColor`).
+    case custom
+
+    var id: String { rawValue }
+
+    static let defaultBorderWidth = 1
+    static let borderWidthRange = 0...8
+
+    static func sanitized(_ rawValue: String?) -> WindowLayoutAreaStyle {
+        rawValue.flatMap(WindowLayoutAreaStyle.init(rawValue:)) ?? .automatic
+    }
+
+    static func sanitizedBorderWidth(_ value: Int) -> Int {
+        min(max(value, borderWidthRange.lowerBound), borderWidthRange.upperBound)
+    }
+}
+
 /// How the drag preview (the destination frame shown while dragging) looks.
 enum WindowLayoutPreviewStyle: String, CaseIterable, Identifiable {
     /// A translucent material that follows the system's light or dark look.
     case system
     case light
     case dark
+    /// The material in the look opposite the system's: dark on a light
+    /// desktop, light on a dark one.
+    case inverse
     /// The accent-tinted fill and outline Window Layout has always drawn.
     case accent
+    /// The same fill and outline in a colour of the user's own
+    /// (`windowLayoutPreviewColor`).
+    case custom
 
     var id: String { rawValue }
 

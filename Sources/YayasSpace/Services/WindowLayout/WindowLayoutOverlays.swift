@@ -18,7 +18,15 @@ final class WindowLayoutOverlays {
     func beginDrag(screens: [WindowActivationScreen],
                    commands: WindowCommandConfiguration,
                    settings: WindowActivationSettings) {
-        guard UserDefaults.standard.bool(forKey: DefaultsKey.windowLayoutHighlightAreas) else { return }
+        let defaults = UserDefaults.standard
+        guard defaults.bool(forKey: DefaultsKey.windowLayoutHighlightAreas) else { return }
+        // Read once per drag: the colour (the accent colour unless one was
+        // picked) and the outline.
+        let color = WindowLayoutAreaStyle.sanitized(defaults.string(forKey: DefaultsKey.windowLayoutAreaStyle)) == .custom
+            ? WindowLayoutColor(hex: defaults.string(forKey: DefaultsKey.windowLayoutAreaColor))?.nsColor
+            : nil
+        let outline = CGFloat(WindowLayoutAreaStyle.sanitizedBorderWidth(
+            defaults.integer(forKey: DefaultsKey.windowLayoutAreaBorderWidth)))
         if panels.count != screens.count {
             panels.forEach { $0.orderOut(nil) }
             panels = screens.map { _ in Self.makePanel() }
@@ -29,7 +37,9 @@ final class WindowLayoutOverlays {
             view.configure(screen: screen,
                            commands: commands[screen.setKind],
                            grid: screen.setKind.grid,
-                           settings: settings)
+                           settings: settings,
+                           color: color,
+                           outline: outline)
             panel.orderFrontRegardless()
         }
         isShowing = true
@@ -72,6 +82,19 @@ final class WindowLayoutOverlays {
     }
 }
 
+extension WindowLayoutColor {
+    var nsColor: NSColor {
+        NSColor(srgbRed: CGFloat(red) / 255, green: CGFloat(green) / 255, blue: CGFloat(blue) / 255, alpha: 1)
+    }
+
+    init?(nsColor: NSColor) {
+        guard let rgb = nsColor.usingColorSpace(.sRGB) else { return nil }
+        self.init(red: Int((rgb.redComponent * 255).rounded()),
+                  green: Int((rgb.greenComponent * 255).rounded()),
+                  blue: Int((rgb.blueComponent * 255).rounded()))
+    }
+}
+
 /// Draws one display's drag areas. Everything is computed once per drag in
 /// `configure`; a highlight change only repaints.
 private final class WindowActivationAreasView: NSView {
@@ -82,6 +105,10 @@ private final class WindowActivationAreasView: NSView {
     }
 
     private var areas: [Area] = []
+    /// Nil draws in the accent colour, read at draw time so it follows a
+    /// change of accent.
+    private var color: NSColor?
+    private var outline: CGFloat = CGFloat(WindowLayoutAreaStyle.defaultBorderWidth)
 
     var highlightedID: UUID? {
         didSet { if oldValue != highlightedID { needsDisplay = true } }
@@ -99,7 +126,11 @@ private final class WindowActivationAreasView: NSView {
     func configure(screen: WindowActivationScreen,
                    commands: [WindowCommand],
                    grid: WindowGrid,
-                   settings: WindowActivationSettings) {
+                   settings: WindowActivationSettings,
+                   color: NSColor?,
+                   outline: CGFloat) {
+        self.color = color
+        self.outline = outline
         let origin = screen.frame.origin
         let bounds = CGRect(origin: .zero, size: screen.frame.size)
         // Bands a few points thick at least, so an 8 pt reach still reads.
@@ -123,7 +154,7 @@ private final class WindowActivationAreasView: NSView {
 
     override func draw(_ dirtyRect: NSRect) {
         guard let context = NSGraphicsContext.current?.cgContext else { return }
-        let accent = NSColor.controlAccentColor
+        let tint = color ?? NSColor.controlAccentColor
         for area in areas {
             let lit = area.id == highlightedID
             context.saveGState()
@@ -135,11 +166,13 @@ private final class WindowActivationAreasView: NSView {
                 let path = CGPath(roundedRect: inset, cornerWidth: radius, cornerHeight: radius,
                                   transform: nil)
                 context.addPath(path)
-                context.setFillColor(accent.withAlphaComponent(lit ? 0.42 : 0.14).cgColor)
+                context.setFillColor(tint.withAlphaComponent(lit ? 0.42 : 0.14).cgColor)
                 context.fillPath()
+                // No outline at 0 pt; the lit area's is a point heavier.
+                guard outline > 0 else { continue }
                 context.addPath(path)
-                context.setStrokeColor(accent.withAlphaComponent(lit ? 0.95 : 0.4).cgColor)
-                context.setLineWidth(lit ? 2 : 1)
+                context.setStrokeColor(tint.withAlphaComponent(lit ? 0.95 : 0.4).cgColor)
+                context.setLineWidth(lit ? outline + 1 : outline)
                 context.strokePath()
             }
             context.restoreGState()

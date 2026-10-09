@@ -21,6 +21,7 @@ enum WindowCommandTests {
         menusAndPlacement(expect)
         restoreOnDrag(expect)
         systemTiling(expect)
+        looksAndAreaOwnership(expect)
         persistence(expect)
         storeCleanUp(expect)
         migration(expect)
@@ -812,6 +813,75 @@ enum WindowCommandTests {
                && !WindowGreenButtonIdentity.isGreenButton(role: "AXStaticText", subrole: nil)
                && !WindowGreenButtonIdentity.isGreenButton(role: nil, subrole: "AXFullScreenButton"),
                "the close and minimize buttons, and anything that is not a button, never open the menu")
+    }
+
+    // MARK: Colours, styles and who owns a drag area
+
+    private static func looksAndAreaOwnership(_ expect: (Bool, String) -> Void) {
+        let picked = WindowLayoutColor(hex: "#1a2B3c")
+        expect(picked == WindowLayoutColor(red: 0x1A, green: 0x2B, blue: 0x3C) && picked?.hex == "#1A2B3C"
+                && WindowLayoutColor(hex: "FF8000")?.hex == "#FF8000",
+               "a picked colour reads from #RRGGBB in either case, with or without the hash, and writes back as #RRGGBB")
+        expect([nil, "", "#12345", "#1234567", "#GG0000", "red"].allSatisfy { WindowLayoutColor(hex: $0) == nil }
+                && WindowLayoutColor(red: 300, green: -4, blue: 128).hex == "#FF0080",
+               "anything else is no colour, and components stay within 0 to 255")
+        expect(WindowLayoutAreaStyle.sanitized(nil) == .automatic && WindowLayoutAreaStyle.sanitized("custom") == .custom
+                && WindowLayoutAreaStyle.sanitizedBorderWidth(-2) == 0 && WindowLayoutAreaStyle.sanitizedBorderWidth(40) == 8
+                && WindowLayoutAreaStyle.defaultBorderWidth == 1,
+               "drag areas draw in the accent colour with a 1 pt outline unless set otherwise, outline 0 to 8 pt")
+        expect(WindowLayoutPreviewStyle.allCases == [.system, .light, .dark, .inverse, .accent, .custom]
+                && WindowLayoutPreviewStyle.sanitized("inverse") == .inverse
+                && WindowLayoutPreviewStyle.sanitized("custom") == .custom
+                && WindowLayoutPreviewStyle.sanitized("neon") == .system,
+               "the preview can also be the opposite of the system's look or a colour of the user's own")
+
+        // Who owns a part of the screen.
+        typealias Region = WindowActivationRegion
+        let bottomLeftSpan = Region.edge(.bottom, start: 1, end: 9)
+        expect(bottomLeftSpan.sharesArea(with: .edge(.bottom, start: 8, end: 12))
+                && !bottomLeftSpan.sharesArea(with: .edge(.bottom, start: 9, end: 12))
+                && !bottomLeftSpan.sharesArea(with: .edge(.top, start: 1, end: 9)),
+               "spans of one edge share area only where they share a unit")
+        expect(Region.corner(.topLeft).sharesArea(with: .corner(.topLeft))
+                && !Region.corner(.topLeft).sharesArea(with: .corner(.topRight))
+                && Region.interior(GridRect(x: 2, y: 2, width: 4, height: 4))
+                    .sharesArea(with: .interior(GridRect(x: 5, y: 5, width: 3, height: 3)))
+                && !Region.interior(GridRect(x: 2, y: 2, width: 4, height: 4))
+                    .sharesArea(with: .interior(GridRect(x: 6, y: 2, width: 3, height: 3)))
+                && !Region.corner(.bottomLeft).sharesArea(with: bottomLeftSpan)
+                && !bottomLeftSpan.sharesArea(with: .interior(GridRect(x: 0, y: 0, width: 24, height: 12))),
+               "a corner, an edge span and an inner rectangle never claim the same part; priority settles them")
+
+        // What the previous owner keeps.
+        expect(bottomLeftSpan.remainder(after: .edge(.bottom, start: 6, end: 12)) == .edge(.bottom, start: 1, end: 6)
+                && bottomLeftSpan.remainder(after: .edge(.bottom, start: 0, end: 3)) == .edge(.bottom, start: 3, end: 9)
+                && bottomLeftSpan.remainder(after: .edge(.bottom, start: 3, end: 5)) == .edge(.bottom, start: 5, end: 9)
+                && bottomLeftSpan.remainder(after: .edge(.bottom, start: 0, end: 24)) == nil
+                && bottomLeftSpan.remainder(after: .edge(.top, start: 0, end: 24)) == bottomLeftSpan,
+               "an edge span keeps its longer leftover, nothing when covered, all of itself when untouched")
+        expect(Region.edge(.left, start: 1, end: 5).remainder(after: .edge(.left, start: 3, end: 4))
+                == .edge(.left, start: 1, end: 3),
+               "with equal leftovers on both sides, the span keeps the one before")
+        expect(Region.interior(GridRect(x: 0, y: 0, width: 10, height: 4))
+                .remainder(after: .interior(GridRect(x: 7, y: 0, width: 5, height: 4)))
+                == .interior(GridRect(x: 0, y: 0, width: 7, height: 4))
+                && Region.interior(GridRect(x: 2, y: 2, width: 2, height: 2))
+                    .remainder(after: .interior(GridRect(x: 0, y: 0, width: 8, height: 8))) == nil
+                && Region.corner(.topRight).remainder(after: .corner(.topRight)) == nil,
+               "an inner rectangle keeps its largest leftover band; a covered one or a taken corner keeps nothing")
+
+        // The first sync with a folder that already holds settings.
+        typealias Sync = WindowLayoutSyncSupport
+        expect(Sync.decide(localModifiedAt: 500, fileModifiedAt: 100, lastSyncedAt: 0, choice: .useFile) == (.adoptFile, false)
+                && Sync.decide(localModifiedAt: 100, fileModifiedAt: 500, lastSyncedAt: 0, choice: .keepThisMac) == (.writeLocal, false)
+                && Sync.decide(localModifiedAt: 100, fileModifiedAt: nil, lastSyncedAt: 0, choice: .useFile) == (.writeLocal, false)
+                && Sync.decide(localModifiedAt: 100, fileModifiedAt: 500, lastSyncedAt: 0) == (.adoptFile, false),
+               "the user's pick decides the first sync with a folder, whatever the clocks say; without one the newer copy wins")
+        expect([DefaultsKey.windowLayoutPreviewColor, DefaultsKey.windowLayoutAreaStyle,
+                DefaultsKey.windowLayoutAreaColor, DefaultsKey.windowLayoutAreaBorderWidth].allSatisfy { key in
+                    Sync.syncedKeys.contains { $0.key == key } && Defaults.registeredDefaults[key] != nil
+                },
+               "the area and preview looks travel with the other settings and have defaults")
     }
 
     // MARK: The system's own drag tiling

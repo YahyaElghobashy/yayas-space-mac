@@ -19,6 +19,17 @@ struct WindowLayoutCommandsTab: View {
     @State private var confirmingReset = false
     @State private var shortcutError: String?
     @State private var isRecording = false
+    /// A drawn drag area that takes part of other commands' areas, waiting
+    /// for the user to say it may.
+    @State private var pendingClaim: PendingAreaClaim?
+
+    private struct PendingAreaClaim {
+        let commandID: UUID
+        let commandName: String
+        let region: WindowActivationRegion
+        let ownerIDs: [UUID]
+        let ownerNames: String
+    }
 
     private var text: WindowCommandStrings { .localized(l10n.language) }
     private var kind: WindowCommandSetKind { selectionModel.kind }
@@ -49,6 +60,17 @@ struct WindowLayoutCommandsTab: View {
             Button(text.cancel, role: .cancel) {}
         } message: {
             Text(text.resetSetMessage)
+        }
+        .alert(String(format: text.areaTakenTitleFormat, pendingClaim?.ownerNames ?? ""),
+               isPresented: Binding(get: { pendingClaim != nil }, set: { if !$0 { pendingClaim = nil } })) {
+            Button(text.areaTakenMove) {
+                if let claim = pendingClaim { saveArea(claim.region, for: claim.commandID, takingFrom: claim.ownerIDs) }
+                pendingClaim = nil
+            }
+            Button(text.cancel, role: .cancel) { pendingClaim = nil }
+        } message: {
+            Text(String(format: text.areaTakenMessageFormat,
+                        pendingClaim?.commandName ?? "", pendingClaim?.ownerNames ?? ""))
         }
     }
 
@@ -377,12 +399,7 @@ struct WindowLayoutCommandsTab: View {
                 .disabled(command.activation == nil)
             WindowActivationEditor(grid: kind.grid,
                                    region: Binding(get: { current(command).activation },
-                                                   set: { region in
-                                                       var updated = current(command)
-                                                       updated.activation = region
-                                                       updated.activationEnabled = region != nil
-                                                       store.update(updated, in: kind)
-                                                   }),
+                                                   set: { region in claimArea(region, for: command) }),
                                    otherRegions: commands.filter { $0.id != command.id }
                                        .compactMap(\.effectiveActivation),
                                    maxHeight: kind == .horizontal ? 190 : 250)
@@ -432,6 +449,48 @@ struct WindowLayoutCommandsTab: View {
     }
 
     // MARK: Actions
+
+    /// Saves a drawn drag area, or first asks, the way Magnet does, when it
+    /// takes part of another command's area in this set.
+    private func claimArea(_ region: WindowActivationRegion?, for command: WindowCommand) {
+        guard let region else {
+            saveArea(nil, for: command.id, takingFrom: [])
+            return
+        }
+        let owners = store.commands(kind).filter { other in
+            other.id != command.id && (other.effectiveActivation?.sharesArea(with: region) ?? false)
+        }
+        guard !owners.isEmpty else {
+            saveArea(region, for: command.id, takingFrom: [])
+            return
+        }
+        let language = l10n.language
+        pendingClaim = PendingAreaClaim(
+            commandID: command.id,
+            commandName: WindowCommandStrings.displayName(of: current(command), language: language),
+            region: region,
+            ownerIDs: owners.map(\.id),
+            ownerNames: owners.map { WindowCommandStrings.displayName(of: $0, language: language) }
+                .joined(separator: ", "))
+    }
+
+    /// The other commands keep only what lies outside the new area (and
+    /// lose their area when nothing is left); then the area is saved.
+    private func saveArea(_ region: WindowActivationRegion?, for commandID: UUID, takingFrom ownerIDs: [UUID]) {
+        if let region {
+            for id in ownerIDs {
+                guard var owner = store.commands(kind).first(where: { $0.id == id }) else { continue }
+                let left = owner.activation?.remainder(after: region)
+                owner.activation = left
+                owner.activationEnabled = owner.activationEnabled && left != nil
+                store.update(owner, in: kind)
+            }
+        }
+        guard var updated = store.commands(kind).first(where: { $0.id == commandID }) else { return }
+        updated.activation = region
+        updated.activationEnabled = region != nil
+        store.update(updated, in: kind)
+    }
 
     /// The stored version of a command, so an edit never works on a copy
     /// the view captured before another edit landed.
