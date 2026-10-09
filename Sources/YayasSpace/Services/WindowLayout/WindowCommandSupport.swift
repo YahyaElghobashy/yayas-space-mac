@@ -299,6 +299,27 @@ struct WindowCommandCapabilities: OptionSet, Hashable {
     static let all: WindowCommandCapabilities = [.move, .resize, .fullScreen]
 }
 
+/// What the menu-bar menu offers for the app in front, in the place of its
+/// Ignore item: ignoring it, no longer ignoring it, or, when Window Layout
+/// cannot arrange its windows at all, a greyed line that says so, the way
+/// Magnet marks an app it does not support.
+enum WindowLayoutFrontAppState: Equatable {
+    case ignorable
+    case ignored
+    case unsupported
+
+    /// `windowCanChange` is about the window the menu would act on, when it
+    /// found one; `hasOnScreenWindows` is what the window server shows for
+    /// the app, Accessibility or not. An app with no window open is still
+    /// one the user may want to ignore.
+    static func resolve(isIgnored: Bool, hasWindow: Bool, windowCanChange: Bool,
+                        hasOnScreenWindows: Bool) -> WindowLayoutFrontAppState {
+        if isIgnored { return .ignored }
+        if hasWindow { return windowCanChange ? .ignorable : .unsupported }
+        return hasOnScreenWindows ? .unsupported : .ignorable
+    }
+}
+
 /// Whether a command can change the focused window, which decides greyed
 /// items in the menu-bar and green-button menus.
 enum WindowCommandAvailability {

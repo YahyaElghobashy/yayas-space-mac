@@ -188,6 +188,7 @@ struct WindowCommandStrings {
     let menuAboutFormat: String
     let menuQuitFormat: String
     let menuNoWindow: String
+    let menuNotSupportedFormat: String
 
     static func localized(_ language: AppLanguage) -> WindowCommandStrings {
         switch language {
@@ -357,7 +358,8 @@ struct WindowCommandStrings {
         menuHelp: "Window Layout Help",
         menuAboutFormat: "About %@",
         menuQuitFormat: "Quit %@",
-        menuNoWindow: "No window to arrange"
+        menuNoWindow: "No window to arrange",
+        menuNotSupportedFormat: "“%@” can’t be arranged"
     )
 
     /// The name a built-in command shows until someone renames it. English

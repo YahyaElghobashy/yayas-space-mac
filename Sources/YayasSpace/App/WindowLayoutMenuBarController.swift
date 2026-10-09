@@ -109,7 +109,16 @@ final class WindowLayoutMenuBarController: NSObject, NSMenuDelegate {
         settings.image = NSImage(systemSymbolName: "switch.2", accessibilityDescription: nil)
         menu.addItem(settings)
 
-        if let appName = context.appName, context.bundleID != nil {
+        if let appName = context.appName, context.bundleID != nil, context.frontAppState == .unsupported {
+            // Nothing Window Layout could do for this app's windows, so
+            // there is nothing to ignore either: a greyed line says so.
+            menu.addItem(.separator())
+            let line = NSMenuItem(title: String(format: text.menuNotSupportedFormat, appName),
+                                  action: nil, keyEquivalent: "")
+            line.isEnabled = false
+            line.image = NSImage(systemSymbolName: "nosign", accessibilityDescription: nil)
+            menu.addItem(line)
+        } else if let appName = context.appName, context.bundleID != nil {
             menu.addItem(.separator())
             let format = context.isIgnored ? text.menuStopIgnoringFormat : text.menuIgnoreFormat
             let ignore = NSMenuItem(title: String(format: format, appName),

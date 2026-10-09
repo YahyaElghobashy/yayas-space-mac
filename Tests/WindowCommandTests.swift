@@ -870,6 +870,19 @@ enum WindowCommandTests {
                 && Region.corner(.topRight).remainder(after: .corner(.topRight)) == nil,
                "an inner rectangle keeps its largest leftover band; a covered one or a taken corner keeps nothing")
 
+        // What the menu-bar menu offers for the app in front.
+        typealias FrontApp = WindowLayoutFrontAppState
+        expect(FrontApp.resolve(isIgnored: false, hasWindow: true, windowCanChange: true, hasOnScreenWindows: true) == .ignorable
+                && FrontApp.resolve(isIgnored: false, hasWindow: false, windowCanChange: false, hasOnScreenWindows: false) == .ignorable,
+               "an app whose window can change, or with no window open, can be ignored")
+        expect(FrontApp.resolve(isIgnored: false, hasWindow: true, windowCanChange: false, hasOnScreenWindows: true) == .unsupported
+                && FrontApp.resolve(isIgnored: false, hasWindow: false, windowCanChange: false, hasOnScreenWindows: true) == .unsupported,
+               "a window that cannot move, resize or go full screen, or windows Accessibility cannot reach, mark the app unsupported")
+        expect(FrontApp.resolve(isIgnored: true, hasWindow: false, windowCanChange: false, hasOnScreenWindows: true) == .ignored,
+               "an ignored app can always be taken off the list again")
+        expect(WindowCommandStrings.enUS.menuNotSupportedFormat.contains("%@"),
+               "the unsupported line names the app")
+
         // The first sync with a folder that already holds settings.
         typealias Sync = WindowLayoutSyncSupport
         expect(Sync.decide(localModifiedAt: 500, fileModifiedAt: 100, lastSyncedAt: 0, choice: .useFile) == (.adoptFile, false)

@@ -1101,16 +1101,40 @@ final class WindowLayoutService: ObservableObject {
             canRestore = frameHistory.peekPrevious(for: resolved.key, current: resolved.frame) != nil
         }
         let isOwnApp = app?.processIdentifier == ProcessInfo.processInfo.processIdentifier
+        let ignored = isIgnored(bundleID: app?.bundleIdentifier)
+        // Without a window Window Layout can use, the window server says
+        // whether the app shows any ordinary window at all; asked only then.
+        let hasOnScreenWindows = resolved == nil && !ignored
+            && app.map { Self.showsOrdinaryWindow(pid: $0.processIdentifier) } == true
+        let frontAppState = WindowLayoutFrontAppState.resolve(isIgnored: ignored,
+                                                              hasWindow: resolved != nil,
+                                                              windowCanChange: !capabilities.isEmpty,
+                                                              hasOnScreenWindows: hasOnScreenWindows)
         return WindowCommandMenuContext(setKind: kind,
                                         appName: isOwnApp ? nil : app?.localizedName,
                                         bundleID: isOwnApp ? nil : app?.bundleIdentifier,
-                                        isIgnored: isIgnored(bundleID: app?.bundleIdentifier),
+                                        isIgnored: ignored,
+                                        frontAppState: frontAppState,
                                         displayCount: screens.count,
                                         canRestore: canRestore,
                                         capabilities: capabilities,
                                         target: resolved?.target,
                                         screenFrame: screen?.frame,
                                         visibleFrame: screen?.visibleFrame)
+    }
+
+    /// Whether the window server shows an ordinary window of this app: on
+    /// screen, at the normal level, visible and at least 40 pt each way.
+    private static func showsOrdinaryWindow(pid: pid_t) -> Bool {
+        WindowServerSupport.onScreenWindowInfo().contains { info in
+            guard (info[kCGWindowOwnerPID as String] as? pid_t) == pid,
+                  (info[kCGWindowLayer as String] as? Int) == 0,
+                  ((info[kCGWindowAlpha as String] as? Double) ?? 1) > 0,
+                  let bounds = info[kCGWindowBounds as String] as? NSDictionary,
+                  let rect = CGRect(dictionaryRepresentation: bounds)
+            else { return false }
+            return rect.width >= 40 && rect.height >= 40
+        }
     }
 
     /// Whether a command would change the window, for greyed menu items:
@@ -3401,6 +3425,8 @@ struct WindowCommandMenuContext {
     let appName: String?
     let bundleID: String?
     let isIgnored: Bool
+    /// What the menu-bar menu offers for the app in front.
+    let frontAppState: WindowLayoutFrontAppState
     let displayCount: Int
     let canRestore: Bool
     /// What the window lets Accessibility change.
