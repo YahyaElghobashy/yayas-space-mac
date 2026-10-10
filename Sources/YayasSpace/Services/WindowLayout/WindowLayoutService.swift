@@ -296,8 +296,10 @@ final class WindowLayoutService: ObservableObject {
             // The set, the command and the check all come from this window.
             let kind = setKind(for: candidate.frame, screens: screens)
             let command = WindowCommandRouting.command(for: action, in: configuration[kind])
-            let capability = command.map { capability(for: $0, setKind: kind) } ?? action.targetCapability
-            guard supports(capability, candidate) else { return .skip }
+            // Named apart from capability(for:setKind:): older compilers read
+            // that name inside this closure as the constant being declared.
+            let needed = command.map { capability(for: $0, setKind: kind) } ?? action.targetCapability
+            guard supports(needed, candidate) else { return .skip }
             route = (command, kind)
             return .accept
         }
