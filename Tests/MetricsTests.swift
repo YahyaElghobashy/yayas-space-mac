@@ -18645,8 +18645,11 @@ struct MetricsTests {
                "screenshot number shortcuts ship enabled")
         expect(Defaults.registeredDefaults[DefaultsKey.screenshotPreviewPosition] as? String == "",
                "screenshot preview placement preserves the existing automatic behavior by default")
-        expect(Defaults.registeredDefaults[DefaultsKey.screenshotSharingEnabled] as? Bool == true,
-               "temporary screenshot links preserve their existing availability by default")
+        // Sealed fork: temporary links uploaded the capture to a server. The
+        // upload is gone (ScreenshotShareService refuses every link) and the
+        // Settings section is hidden, so the switch ships off (0f88065).
+        expect(Defaults.registeredDefaults[DefaultsKey.screenshotSharingEnabled] as? Bool == false,
+               "sealed build: temporary screenshot links are removed, so their switch ships off")
         expect(Defaults.registeredDefaults[DefaultsKey.screenshotToolOrder] as? String
                 == ScreenshotSupport.Tool.defaultOrderStorage,
                "the screenshot rail ships in its useful numbered order")
@@ -22447,8 +22450,10 @@ struct MetricsTests {
                "a recording carries the sound of the Mac unless the person turns it off")
         expect(Defaults.registeredDefaults[DefaultsKey.recorderMicrophone] as? Bool == false,
                "microphone recording is optional and ships off")
-        expect(Defaults.registeredDefaults[DefaultsKey.recorderSharingEnabled] as? Bool == true,
-               "temporary recording links stay visible but do nothing until explicitly used")
+        // Sealed fork: as for screenshots, recording links are removed
+        // (RecordingShareService refuses every link), so the switch ships off.
+        expect(Defaults.registeredDefaults[DefaultsKey.recorderSharingEnabled] as? Bool == false,
+               "sealed build: temporary recording links are removed, so their switch ships off")
         expect(Defaults.registeredDefaults[DefaultsKey.recorderQuality] as? String == "balanced"
                 && Defaults.registeredDefaults[DefaultsKey.recorderFrameRate] as? Int == 60
                 && Defaults.registeredDefaults[DefaultsKey.recorderCountdown] as? Int == 3
@@ -25022,9 +25027,14 @@ struct MetricsTests {
         // on the app people actually use. CI never passes --install.
         let buildScriptCode = buildScript.components(separatedBy: "\n")
             .filter { !$0.trimmingCharacters(in: .whitespaces).hasPrefix("#") }
-        expect(buildScriptCode.contains { $0.contains("(( DEV || INSTALL ))")
-                                            && $0.contains("developer_id_identity") },
-               "the signing setup guard covers every install, not only the Developer variant")
+        // Sealed fork (ed5afaf): the guard still covers every install, as
+        // upstream's does, but a plain --dev build never touches the
+        // keychain; it signs ad-hoc and keeps its copy in dist/.
+        expect(buildScriptCode.contains { $0.contains("(( INSTALL ))")
+                                            && $0.contains("developer_id_identity") }
+                && !buildScriptCode.contains { $0.contains("(( DEV || INSTALL ))")
+                                                 && $0.contains("developer_id_identity") },
+               "the signing setup guard covers every install, and a plain --dev build never creates a keychain identity")
         // The setup script must run against the stock /usr/bin/openssl, which
         // is LibreSSL: it rejects OpenSSL 3's -legacy flag outright, and the
         // script once died on exactly that with its stderr discarded. The
@@ -25630,14 +25640,22 @@ struct MetricsTests {
         }
 
         // MARK: A sleeping clock
-        for shareService in ["Sources/YayasSpace/Services/QuickTools/ScreenshotShareService.swift",
-                             "Sources/YayasSpace/Services/Recorder/RecordingShareService.swift"] {
+        // Upstream recomputes link expiry on wake, which a sleeping clock
+        // missed. The sealed build has no links to expire: both share
+        // services refuse every link, keep no records and send nothing, so
+        // there is no expiry clock at all.
+        for (shareService, refusal) in [
+            ("Sources/YayasSpace/Services/QuickTools/ScreenshotShareService.swift", "ScreenshotShareError.unavailable"),
+            ("Sources/YayasSpace/Services/Recorder/RecordingShareService.swift", "RecordingShareError.unavailable"),
+        ] {
             let shareCode = ((try? String(contentsOfFile: shareService, encoding: .utf8)) ?? "")
                 .components(separatedBy: "\n")
                 .filter { !$0.trimmingCharacters(in: .whitespaces).hasPrefix("//") }
                 .joined(separator: "\n")
-            expect(shareCode.contains("NSWorkspace.didWakeNotification"),
-                   "\(shareService) recomputes share link expiry on wake, which its sleeping clock missed")
+            expect(shareCode.contains("throw \(refusal)") && shareCode.contains("records = []")
+                    && !shareCode.contains("URLSession") && !shareCode.contains("URLRequest")
+                    && !shareCode.contains("Timer"),
+                   "\(shareService) refuses every link and keeps no expiry clock in the sealed build")
         }
 
         // The confirmation HUD is a hand-laid AppKit panel, so its width is
